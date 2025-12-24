@@ -1,6 +1,6 @@
 """
 Finsense Market MCP Server - Skeleton Implementation
-A minimal MCP server exposing four placeholder tools for market data research.
+A minimal MCP server exposing three placeholder tools for market data research.
 """
 
 import asyncio
@@ -19,76 +19,49 @@ async def list_tools() -> list[Tool]:
     """
     return [
         Tool(
+            name="get_stock_price",
+            description="Get current/latest price for a given stock ticker",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "Stock ticker symbol (e.g., 'AAPL', 'MSFT', 'GOOGL')"
+                    }
+                },
+                "required": ["ticker"]
+            }
+        ),
+        Tool(
             name="get_returns",
-            description="Get historical returns for a stock ticker over a timeframe",
+            description="Get historical daily/weekly returns over a specified timeframe",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "ticker": {
                         "type": "string",
-                        "description": "Stock ticker symbol (e.g., 'AAPL', 'MSFT')"
+                        "description": "Stock ticker symbol"
                     },
                     "timeframe": {
                         "type": "string",
-                        "description": "Time period for returns (e.g., '1d', '1w', '1m', '1y')"
+                        "description": "Time period for returns (e.g., '1m', '3m', '1y')"
                     }
                 },
                 "required": ["ticker", "timeframe"]
             }
         ),
         Tool(
-            name="get_stock_metrics",
-            description="Get key metrics for a stock ticker over a timeframe",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "Stock ticker symbol (e.g., 'AAPL', 'MSFT')"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "description": "Time period for metrics (e.g., '1d', '1w', '1m', '1y')"
-                    }
-                },
-                "required": ["ticker", "timeframe"]
-            }
-        ),
-        Tool(
-            name="get_sector_metrics",
-            description="Get aggregated metrics for a financial sector over a timeframe",
+            name="get_sector_summary",
+            description="Get aggregated sector-level summary including performance metrics",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "sector": {
                         "type": "string",
-                        "description": "Financial sector (e.g., 'technology', 'healthcare', 'energy')"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "description": "Time period for metrics (e.g., '1d', '1w', '1m', '1y')"
+                        "description": "Financial sector name (e.g., 'technology', 'healthcare', 'energy')"
                     }
                 },
-                "required": ["sector", "timeframe"]
-            }
-        ),
-        Tool(
-            name="compare_sectors",
-            description="Compare metrics across multiple sectors over a timeframe",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "sectors": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "List of sectors to compare (e.g., ['technology', 'healthcare'])"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "description": "Time period for comparison (e.g., '1d', '1w', '1m', '1y')"
-                    }
-                },
-                "required": ["sectors", "timeframe"]
+                "required": ["sector"]
             }
         )
     ]
@@ -101,17 +74,36 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     Returns hardcoded placeholder data for each tool.
     """
     
-    if name == "get_returns":
-        # Return placeholder returns data
+    if name == "get_stock_price":
+        # Return placeholder stock price
+        ticker = arguments.get("ticker", "UNKNOWN")
+        
+        placeholder_price = {
+            "ticker": ticker,
+            "price": 152.34,
+            "currency": "USD",
+            "timestamp": "2025-01-15T16:00:00Z",
+            "change": 2.45,
+            "change_percent": 1.63
+        }
+        
+        return [TextContent(
+            type="text",
+            text=str(placeholder_price)
+        )]
+    
+    elif name == "get_returns":
+        # Return placeholder historical returns
         ticker = arguments.get("ticker", "UNKNOWN")
         timeframe = arguments.get("timeframe", "unknown")
         
         placeholder_returns = {
             "ticker": ticker,
             "timeframe": timeframe,
-            "total_return": 12.5,
-            "daily_returns": [0.5, -0.3, 1.2, 0.8, -0.1],
-            "cumulative_return": 12.5
+            "returns": [0.012, -0.008, 0.015, 0.003, -0.011, 0.019, 0.007],
+            "period": "daily",
+            "start_date": "2024-12-15",
+            "end_date": "2025-01-15"
         }
         
         return [TextContent(
@@ -119,68 +111,24 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             text=str(placeholder_returns)
         )]
     
-    elif name == "get_stock_metrics":
-        # Return placeholder stock metrics
-        ticker = arguments.get("ticker", "UNKNOWN")
-        timeframe = arguments.get("timeframe", "unknown")
-        
-        placeholder_metrics = {
-            "ticker": ticker,
-            "timeframe": timeframe,
-            "volatility": 18.3,
-            "sharpe_ratio": 1.45,
-            "max_drawdown": -8.2,
-            "beta": 1.12,
-            "avg_volume": 45000000
-        }
-        
-        return [TextContent(
-            type="text",
-            text=str(placeholder_metrics)
-        )]
-    
-    elif name == "get_sector_metrics":
-        # Return placeholder sector metrics
+    elif name == "get_sector_summary":
+        # Return placeholder sector summary
         sector = arguments.get("sector", "unknown")
-        timeframe = arguments.get("timeframe", "unknown")
         
-        placeholder_metrics = {
+        placeholder_summary = {
             "sector": sector,
-            "timeframe": timeframe,
-            "avg_return": 8.7,
-            "avg_volatility": 15.2,
-            "top_performers": ["STOCK1", "STOCK2", "STOCK3"],
-            "worst_performers": ["STOCK4", "STOCK5"],
-            "sector_beta": 1.05
+            "avg_return": 0.045,
+            "volatility": 0.18,
+            "top_performers": ["AAPL", "MSFT", "NVDA"],
+            "bottom_performers": ["IBM", "INTC"],
+            "market_cap_total": "12.5T",
+            "num_stocks": 45,
+            "sector_beta": 1.12
         }
         
         return [TextContent(
             type="text",
-            text=str(placeholder_metrics)
-        )]
-    
-    elif name == "compare_sectors":
-        # Return placeholder sector comparison
-        sectors = arguments.get("sectors", [])
-        timeframe = arguments.get("timeframe", "unknown")
-        
-        placeholder_comparison = {
-            "timeframe": timeframe,
-            "sectors": {
-                sector: {
-                    "return": 10.0 + (i * 2.5),
-                    "volatility": 15.0 + (i * 1.5),
-                    "sharpe_ratio": 1.2 + (i * 0.1)
-                }
-                for i, sector in enumerate(sectors)
-            },
-            "best_sector": sectors[0] if sectors else "unknown",
-            "worst_sector": sectors[-1] if sectors else "unknown"
-        }
-        
-        return [TextContent(
-            type="text",
-            text=str(placeholder_comparison)
+            text=str(placeholder_summary)
         )]
     
     else:
