@@ -9,7 +9,7 @@ from mcp.types import Tool, TextContent
 import mcp.server.stdio
 
 # Initialize MCP server
-app = Server("finsense-analytics")
+app = Server("finsense-risk")
 
 
 @app.list_tools()
