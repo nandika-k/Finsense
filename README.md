@@ -3,17 +3,7 @@ A personalized financial research assistant.
 
 Finsense helps users make sense of market uncertainty by combining live market data, news events, and risk analysis. Instead of giving investment advice, it highlights what areas of the market are worth researching based on current conditions and a user’s preferences.
 
-The system is built around AI agents that reason about information, supported by modular MCP servers that provide reliable data and analytics.
-
-## AI Agents
-### Coordinator Agent
-The main, user-facing agent. It interprets the user’s goals, risk tolerance, and ethical boundaries, decides what type of analysis is needed, and combines insights from specialized agents into a clear, human-readable summary.
-
-### Macro & Events Agent
-Focuses on understanding what is happening in the world. It analyzes news headlines to identify macroeconomic and geopolitical risks and explains how these events may affect different market sectors.
-
-### Market & Risk Agent
-Focuses on quantitative market behavior. It evaluates sector and stock performance, correlations, and volatility to identify patterns that may indicate elevated risk or emerging trends.
+The system is built around an AI agent that reasons about information, supported by modular MCP servers that provide reliable data and analytics.
 
 ## MCP Servers
 ### mcp_market

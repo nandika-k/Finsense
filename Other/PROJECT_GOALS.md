@@ -1,5 +1,5 @@
 ## Goal
-An agent-to-agent financial research assistant that helps users figure out what sectors and stocks to research based on user preferences, market behavior, and world events.
+An agentic AI financial research assistant that helps users figure out what sectors and stocks to research based on user preferences, market behavior, and world events.
 
 ## System Behavior
 Analyze headlines for geopolitical risks
