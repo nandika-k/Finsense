@@ -8,6 +8,13 @@ from mcp.server import Server
 from mcp.types import Tool, TextContent
 import mcp.server.stdio
 
+# LOGGING ADDED: import logging to enable logging
+import logging
+# LOGGING ADDED: configure basic logging (INFO level)
+logging.basicConfig(level=logging.INFO)
+# LOGGING ADDED: module logger
+logger = logging.getLogger(__name__)
+
 # Initialize MCP server
 app = Server("finsense-market")
 
@@ -17,6 +24,8 @@ async def list_tools() -> list[Tool]:
     """
     Register available tools with the MCP server.
     """
+    # LOGGING ADDED: log that list_tools was called
+    logger.info("list_tools called")
     return [
         Tool(
             name="get_stock_price",
@@ -73,6 +82,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     Handle tool execution requests.
     Returns hardcoded placeholder data for each tool.
     """
+    # LOGGING ADDED: log tool call with name and arguments
+    logger.info("call_tool: %s args=%s", name, arguments)
     
     if name == "get_stock_price":
         # Return placeholder stock price
@@ -86,6 +97,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             "change": 2.45,
             "change_percent": 1.63
         }
+        # LOGGING ADDED: debug log placeholder stock price
+        logger.debug("get_stock_price -> %s", placeholder_price)
         
         return [TextContent(
             type="text",
@@ -105,6 +118,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             "start_date": "2024-12-15",
             "end_date": "2025-01-15"
         }
+        # LOGGING ADDED: debug log placeholder returns
+        logger.debug("get_returns -> %s", placeholder_returns)
         
         return [TextContent(
             type="text",
@@ -125,6 +140,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             "num_stocks": 45,
             "sector_beta": 1.12
         }
+        # LOGGING ADDED: debug log sector summary
+        logger.debug("get_sector_summary -> %s", placeholder_summary)
         
         return [TextContent(
             type="text",
@@ -132,6 +149,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         )]
     
     else:
+        # LOGGING ADDED: warn on unknown tool
+        logger.warning("Unknown tool requested: %s", name)
         return [TextContent(
             type="text",
             text=f"Unknown tool: {name}"
@@ -142,6 +161,8 @@ async def main():
     """
     Run the MCP server using stdio transport.
     """
+    # LOGGING ADDED: log server start
+    logger.info("Starting MCP server 'finsense-market' using stdio transport")
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await app.run(
             read_stream,

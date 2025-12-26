@@ -8,6 +8,13 @@ from mcp.server import Server
 from mcp.types import Tool, TextContent
 import mcp.server.stdio
 
+# LOGGING ADDED: import logging to enable logging
+import logging
+# LOGGING ADDED: configure basic logging (INFO level)
+logging.basicConfig(level=logging.INFO)
+# LOGGING ADDED: module logger
+logger = logging.getLogger(__name__)
+
 # Initialize MCP server
 app = Server("finsense-news")
 
@@ -17,6 +24,8 @@ async def list_tools() -> list[Tool]:
     """
     Register available tools with the MCP server.
     """
+    # LOGGING ADDED: log that list_tools was called
+    logger.info("list_tools called")
     return [
         Tool(
             name="fetch_headlines",
@@ -76,6 +85,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     Returns hardcoded placeholder data for each tool.
     """
     
+    # LOGGING ADDED: log tool call with name and arguments
+    logger.info("call_tool: %s args=%s", name, arguments)
+    
     if name == "fetch_headlines":
         # Return placeholder headlines
         sector = arguments.get("sector", "unknown")
@@ -87,6 +99,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             f"{sector.capitalize()} stocks volatile amid market uncertainty",
             f"Analysts upgrade {sector} outlook for {timeframe}"
         ]
+        # LOGGING ADDED: log generated placeholder headlines for sector/timeframe
+        logger.debug("fetch_headlines generated %s for sector=%s timeframe=%s", placeholder_headlines, sector, timeframe)
         
         return [TextContent(
             type="text",
@@ -101,6 +115,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             "Earnings Uncertainty",
             "Geopolitical Tension"
         ]
+        # LOGGING ADDED: log extracted placeholder themes
+        logger.debug("extract_risk_themes -> %s", placeholder_themes)
         
         return [TextContent(
             type="text",
@@ -115,6 +131,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             "Earnings Uncertainty": ["retail", "manufacturing"],
             "Geopolitical Tension": ["energy", "defense", "materials"]
         }
+        # LOGGING ADDED: log theme->sector mapping
+        logger.debug("map_themes_to_sectors -> %s", placeholder_mapping)
         
         return [TextContent(
             type="text",
@@ -122,6 +140,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         )]
     
     else:
+        # LOGGING ADDED: log unknown tool request
+        logger.warning("Unknown tool requested: %s", name)
         return [TextContent(
             type="text",
             text=f"Unknown tool: {name}"
@@ -132,6 +152,8 @@ async def main():
     """
     Run the MCP server using stdio transport.
     """
+    # LOGGING ADDED: log server start
+    logger.info("Starting MCP server 'finsense-news' using stdio transport")
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await app.run(
             read_stream,
