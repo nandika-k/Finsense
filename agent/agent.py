@@ -1,189 +1,246 @@
-"""
-Finsense Coordinator Agent - Windows-safe Implementation
-Launches MCP servers, waits for readiness, and connects via stdio_client.
-"""
-
 import asyncio
-from contextlib import AsyncExitStack
-from mcp import ClientSession
-from mcp.client.stdio import stdio_client, StdioServerParameters
+import json
+import sys
 from pathlib import Path
-import subprocess
 import logging
+import subprocess
+from typing import Dict, Any, List
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+class MCPClient:
+    """Manual MCP client that works reliably on Windows"""
+    
+    def __init__(self, server_path: Path):
+        self.server_path = server_path
+        self.process = None
+        self.request_id = 0
+        self.initialized = False
+
+    async def start(self):
+        """Start the MCP server process"""
+        logger.info("Starting MCP server: %s", self.server_path.name)
+        
+        if not self.server_path.exists():
+            raise FileNotFoundError(f"Server file not found: {self.server_path}")
+        
+        # Use PYTHONUNBUFFERED to disable output buffering
+        env = {**subprocess.os.environ, "PYTHONUNBUFFERED": "1"}
+        
+        self.process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-u",  # Unbuffered
+            str(self.server_path),
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env
+        )
+        
+        logger.info("Server started with PID: %s", self.process.pid)
+        
+        # Give server a moment to initialize
+        await asyncio.sleep(0.1)
+        
+        # Initialize the MCP connection
+        await self._initialize()
+        
+    async def _send_request(self, method: str, params: dict = None) -> Dict[str, Any]:
+        """Send a JSON-RPC request and wait for response"""
+        self.request_id += 1
+        request = {
+            "jsonrpc": "2.0",
+            "id": self.request_id,
+            "method": method,
+            "params": params or {}
+        }
+        
+        request_str = json.dumps(request) + "\n"
+        logger.debug("→ %s", request_str.strip())
+        
+        self.process.stdin.write(request_str.encode('utf-8'))
+        await self.process.stdin.drain()
+        
+        # Read response, skipping empty lines
+        max_attempts = 10
+        for attempt in range(max_attempts):
+            response_line = await asyncio.wait_for(
+                self.process.stdout.readline(),
+                timeout=10.0
+            )
+            
+            response_text = response_line.decode('utf-8').strip()
+            
+            if not response_text:
+                if attempt < max_attempts - 1:
+                    continue
+                raise Exception("No response from server")
+            
+            logger.debug("← %s", response_text[:200] + "..." if len(response_text) > 200 else response_text)
+            
+            response = json.loads(response_text)
+            
+            if "error" in response:
+                raise Exception(f"JSON-RPC error: {response['error']}")
+            
+            return response.get("result")
+        
+        raise Exception("Failed to get valid response")
+    
+    async def _send_notification(self, method: str, params: dict = None):
+        """Send a JSON-RPC notification (no response expected)"""
+        notification = {
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params or {}
+        }
+        
+        notification_str = json.dumps(notification) + "\n"
+        logger.debug("→ [notification] %s", notification_str.strip())
+        
+        self.process.stdin.write(notification_str.encode('utf-8'))
+        await self.process.stdin.drain()
+    
+    async def _initialize(self):
+        """Initialize the MCP connection"""
+        logger.info("Initializing MCP session...")
+        
+        result = await self._send_request("initialize", {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {
+                "name": "finsense-coordinator",
+                "version": "1.0.0"
+            }
+        })
+        
+        logger.info("Connected to: %s v%s", 
+                   result["serverInfo"]["name"],
+                   result["serverInfo"]["version"])
+        
+        # Send initialized notification
+        await self._send_notification("notifications/initialized")
+        
+        self.initialized = True
+    
+    async def list_tools(self) -> List[Dict[str, Any]]:
+        """List available tools"""
+        result = await self._send_request("tools/list")
+        return result.get("tools", [])
+    
+    async def call_tool(self, name: str, arguments: dict) -> Dict[str, Any]:
+        """Call a tool"""
+        logger.info("Calling tool: %s", name)
+        result = await self._send_request("tools/call", {
+            "name": name,
+            "arguments": arguments
+        })
+        return result
+    
+    async def close(self):
+        """Close the connection"""
+        if self.process:
+            self.process.terminate()
+            try:
+                await asyncio.wait_for(self.process.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                self.process.kill()
+                await self.process.wait()
+            logger.info("Server stopped")
+
+
 class FinsenseCoordinator:
+    """Coordinates multiple MCP servers for financial analysis"""
+    
     def __init__(self):
-        self.news_session: ClientSession | None = None
-        self.market_session: ClientSession | None = None
-        self.risk_session: ClientSession | None = None
-        self.news_tools = []
-        self.market_tools = []
-        self.risk_tools = []
-        self.exit_stack: AsyncExitStack | None = None
-        self.processes = []
+        self.news_client: MCPClient | None = None
 
-    async def connect_servers(self):
-        logger.info("connect_servers called")
-        self.exit_stack = AsyncExitStack()
+    async def initialize(self):
+        """Initialize all MCP server connections"""
+        logger.info("Initializing Finsense Coordinator...")
+        
+        # Connect to news server
+        news_server_path = BASE_DIR / "mcp_news" / "finsense_news.py"
+        self.news_client = MCPClient(news_server_path)
+        await self.news_client.start()
+        
+        # List available tools
+        tools = await self.news_client.list_tools()
+        logger.info("Available tools: %s", [t["name"] for t in tools])
+        
+        logger.info("✓ Coordinator initialized")
 
-        # --- News MCP Server ---
-        news_params = StdioServerParameters(
-            command="python",
-            args=[str(BASE_DIR / "mcp_news/finsense_news.py")]
-        )
-        self.news_session = await self._connect_server(news_params)
-        self.news_tools = await self._list_tools(self.news_session)
-
-        # --- Market MCP Server ---
-        market_params = StdioServerParameters(
-            command="python",
-            args=[str(BASE_DIR / "mcp_market/finsense_market.py")]
-        )
-        self.market_session = await self._connect_server(market_params)
-        self.market_tools = await self._list_tools(self.market_session)
-
-        # --- Risk MCP Server ---
-        risk_params = StdioServerParameters(
-            command="python",
-            args=[str(BASE_DIR / "mcp_risk/finsense_risk.py")]
-        )
-        self.risk_session = await self._connect_server(risk_params)
-        self.risk_tools = await self._list_tools(self.risk_session)
-
-    async def _connect_server(self, server_params: StdioServerParameters):
-        logger.info("Connecting to server with params: %s", server_params)
-        if not self.exit_stack:
-            raise RuntimeError("Exit stack not initialized")
-
-        # Launch server subprocess
-        proc = subprocess.Popen(
-            [server_params.command, *server_params.args],
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1
-        )
-        self.processes.append(proc)
-
-        # Wait for "ready" line
-        logger.info("Waiting for server to be ready...")
-        while True:
-            line = proc.stdout.readline()
-            if line == "":
-                if proc.poll() is not None:
-                    raise RuntimeError(f"Server {server_params.args} exited prematurely")
-                await asyncio.sleep(0.1)
-                continue
-            line = line.strip()
-            logger.debug("Server output: %s", line)
-            if line.lower() == "ready":
-                break
-
-        # Connect via stdio_client
-        read_stream, write_stream = await self.exit_stack.enter_async_context(
-            stdio_client(server_params)
-        )
-        session = ClientSession(read_stream, write_stream)
-        await session.initialize()
-        logger.info("Session initialized for: %s", server_params)
-        return session
-
-    async def _list_tools(self, session: ClientSession):
-        logger.info("Listing tools from session")
-        result = await session.list_tools()
-        logger.debug("Tools returned: %s", [t.name for t in result.tools])
-        return result.tools
-
-    # --- Tool call helpers ---
-    async def call_news_tool(self, tool_name, arguments):
-        result = await self.news_session.call_tool(tool_name, arguments)
-        return result.content[0].text
-
-    async def call_market_tool(self, tool_name, arguments):
-        result = await self.market_session.call_tool(tool_name, arguments)
-        return result.content[0].text
-
-    async def call_risk_tool(self, tool_name, arguments):
-        result = await self.risk_session.call_tool(tool_name, arguments)
-        return result.content[0].text
-
-    # --- Workflow methods ---
-    async def analyze_sector_risk(self, sector, timeframe):
-        logger.info("analyze_sector_risk: sector=%s timeframe=%s", sector, timeframe)
-
-        headlines = await self.call_news_tool("fetch_headlines", {"sector": sector, "timeframe": timeframe})
-        sector_summary = await self.call_market_tool("get_sector_summary", {"sector": sector})
-        volatility = await self.call_risk_tool("compute_sector_volatility", {"sector": sector, "timeframe": timeframe})
-        risk_themes = await self.call_news_tool("extract_risk_themes", {"headlines": eval(headlines)})
-
-        print(f"Sector: {sector}")
-        print(f"Headlines: {headlines}")
-        print(f"Sector Summary: {sector_summary}")
-        print(f"Volatility: {volatility}")
-        print(f"Risk Themes: {risk_themes}")
-
-        return {
+    async def fetch_headlines(self, sector: str, timeframe: str) -> List[str]:
+        """Fetch news headlines for a sector"""
+        result = await self.news_client.call_tool("fetch_headlines", {
             "sector": sector,
-            "headlines": headlines,
-            "sector_summary": sector_summary,
-            "volatility": volatility,
-            "risk_themes": risk_themes
-        }
+            "timeframe": timeframe
+        })
+        
+        # Parse the result
+        content = result["content"][0]["text"]
+        # The result is a string representation of a list, so evaluate it
+        import ast
+        headlines = ast.literal_eval(content)
+        return headlines
 
-    async def compare_sectors_workflow(self, sector1, sector2, timeframe):
-        comparison = await self.call_risk_tool("compare_sectors", {"sector1": sector1, "sector2": sector2, "timeframe": timeframe})
-        correlations = await self.call_risk_tool("compute_sector_correlations", {"sectors": [sector1, sector2], "timeframe": timeframe})
-
-        print(f"Comparing sectors: {sector1} vs {sector2} over {timeframe}")
-        print(f"Sector Comparison: {comparison}")
-        print(f"Correlations: {correlations}")
-
-        return {
-            "comparison": comparison,
-            "correlations": correlations
-        }
+    async def extract_risk_themes(self, headlines: List[str]) -> List[str]:
+        """Extract risk themes from headlines"""
+        result = await self.news_client.call_tool("extract_risk_themes", {
+            "headlines": headlines
+        })
+        
+        content = result["content"][0]["text"]
+        import ast
+        themes = ast.literal_eval(content)
+        return themes
 
     async def cleanup(self):
-        if self.exit_stack:
-            await self.exit_stack.aclose()
-            logger.info("All MCP server connections closed")
+        """Clean up all connections"""
+        logger.info("Shutting down...")
+        if self.news_client:
+            await self.news_client.close()
 
-        # Terminate subprocesses
-        for proc in self.processes:
-            if proc.poll() is None:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-        logger.info("All MCP server subprocesses terminated")
 
 async def main():
-    logger.info("Starting FinsenseCoordinator agent")
+    """Example usage"""
     coordinator = FinsenseCoordinator()
-
+    
     try:
-        print("Connecting to MCP servers...")
-        await coordinator.connect_servers()
-
-        print(f"News tools: {[t.name for t in coordinator.news_tools]}")
-        print(f"Market tools: {[t.name for t in coordinator.market_tools]}")
-        print(f"Risk tools: {[t.name for t in coordinator.risk_tools]}")
-
-        print("\n--- Running Sector Risk Analysis ---")
-        await coordinator.analyze_sector_risk("technology", "30d")
-
-        print("\n--- Running Sector Comparison ---")
-        await coordinator.compare_sectors_workflow("technology", "healthcare", "3m")
-
+        await coordinator.initialize()
+        
+        # Fetch headlines
+        print("\n" + "="*60)
+        print("Fetching technology sector headlines...")
+        print("="*60)
+        headlines = await coordinator.fetch_headlines("technology", "7d")
+        for i, headline in enumerate(headlines, 1):
+            print(f"{i}. {headline}")
+        
+        # Extract risk themes
+        print("\n" + "="*60)
+        print("Extracting risk themes...")
+        print("="*60)
+        themes = await coordinator.extract_risk_themes(headlines)
+        for i, theme in enumerate(themes, 1):
+            print(f"{i}. {theme}")
+        
+        print("\n" + "="*60)
+        print("✓ Analysis complete")
+        print("="*60 + "\n")
+        
+    except Exception as e:
+        logger.exception("Error: %s", e)
     finally:
         await coordinator.cleanup()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
