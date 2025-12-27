@@ -4,6 +4,9 @@ from mcp.types import Tool, TextContent
 import mcp.server.stdio
 import sys
 import os
+import json
+import yfinance as yf
+from datetime import datetime, timedelta
 
 # Ensure stdout is unbuffered
 sys.stdout.reconfigure(line_buffering=True)
@@ -72,44 +75,115 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     
     if name == "get_sector_summary":
         sector = arguments.get("sector", "")
-        # Mock data - replace with real API calls
-        summary = {
-            "sector": sector,
-            "performance_1d": "+1.2%",
-            "performance_1w": "+3.4%",
-            "performance_1m": "+5.6%",
-            "top_performers": [
-                {"ticker": "ABC", "change": "+5.2%"},
-                {"ticker": "XYZ", "change": "+4.1%"}
-            ],
-            "market_cap": "$2.5T",
-            "volume": "125M shares"
+        # Map sectors to representative ETFs
+        sector_map = {
+            "technology": "XLK",
+            "healthcare": "XLV",
+            "financial-services": "XLF",
+            "energy": "XLE",
+            "consumer": "XLY",
+            "industrials": "XLI",
+            "materials": "XLB",
+            "real-estate": "XLRE",
+            "utilities": "XLU",
+            "communications": "XLC"
         }
-        return [TextContent(type="text", text=str(summary))]
+        ticker_symbol = sector_map.get(sector.lower(), "SPY")
+        
+        try:
+            ticker = yf.Ticker(ticker_symbol)
+            hist = ticker.history(period="1mo")
+            
+            if len(hist) > 0:
+                current_price = hist['Close'].iloc[-1]
+                price_1w_ago = hist['Close'].iloc[-5] if len(hist) >= 5 else hist['Close'].iloc[0]
+                price_1m_ago = hist['Close'].iloc[0]
+                
+                perf_1d = ((current_price - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2] * 100) if len(hist) > 1 else 0
+                perf_1w = ((current_price - price_1w_ago) / price_1w_ago * 100) if price_1w_ago > 0 else 0
+                perf_1m = ((current_price - price_1m_ago) / price_1m_ago * 100) if price_1m_ago > 0 else 0
+                
+                summary = {
+                    "sector": sector,
+                    "performance_1d": f"{perf_1d:+.2f}%",
+                    "performance_1w": f"{perf_1w:+.2f}%",
+                    "performance_1m": f"{perf_1m:+.2f}%",
+                    "current_price": round(current_price, 2),
+                    "market_cap": ticker.info.get("marketCap", "N/A"),
+                    "volume": ticker.info.get("volume", "N/A")
+                }
+            else:
+                summary = {"sector": sector, "error": "No data available"}
+        except Exception as e:
+            log(f"Error fetching sector summary: {e}")
+            summary = {"sector": sector, "error": str(e)}
+        
+        return [TextContent(type="text", text=json.dumps(summary, default=str))]
     
     elif name == "get_stock_price":
-        ticker = arguments.get("ticker", "")
-        # Mock data - replace with real API calls
-        stock_data = {
-            "ticker": ticker.upper(),
-            "price": 150.25,
-            "change": "+2.50",
-            "change_percent": "+1.69%",
-            "volume": "45.2M",
-            "market_cap": "$2.5T",
-            "pe_ratio": 28.5
-        }
-        return [TextContent(type="text", text=str(stock_data))]
+        ticker = arguments.get("ticker", "").upper()
+        try:
+            tick = yf.Ticker(ticker)
+            info = tick.info
+            hist = tick.history(period="1d")
+            
+            if len(hist) > 0:
+                current_price = hist['Close'].iloc[-1]
+                if len(hist) > 1:
+                    previous_price = hist['Close'].iloc[-2]
+                    change = current_price - previous_price
+                    change_percent = (change / previous_price * 100) if previous_price > 0 else 0
+                else:
+                    change = 0
+                    change_percent = 0
+                
+                stock_data = {
+                    "ticker": ticker,
+                    "price": round(current_price, 2),
+                    "change": f"{change:+.2f}",
+                    "change_percent": f"{change_percent:+.2f}%",
+                    "volume": info.get("volume", "N/A"),
+                    "market_cap": info.get("marketCap", "N/A"),
+                    "pe_ratio": round(info.get("trailingPE", 0), 2) if info.get("trailingPE") else "N/A"
+                }
+            else:
+                stock_data = {"ticker": ticker, "error": "No price data available"}
+        except Exception as e:
+            log(f"Error fetching stock price: {e}")
+            stock_data = {"ticker": ticker, "error": str(e)}
+        
+        return [TextContent(type="text", text=json.dumps(stock_data, default=str))]
     
     elif name == "get_market_indices":
-        # Mock data - replace with real API calls
-        indices = {
-            "SPX": {"value": 4750.50, "change": "+0.8%"},
-            "DJI": {"value": 37500.25, "change": "+0.6%"},
-            "IXIC": {"value": 15200.75, "change": "+1.2%"},
-            "RUT": {"value": 2050.30, "change": "+0.4%"}
+        indices_map = {
+            "SPX": "^GSPC",
+            "DJI": "^DJI",
+            "IXIC": "^IXIC",
+            "RUT": "^RUT"
         }
-        return [TextContent(type="text", text=str(indices))]
+        indices = {}
+        
+        try:
+            for name_key, symbol in indices_map.items():
+                tick = yf.Ticker(symbol)
+                hist = tick.history(period="1d")
+                
+                if len(hist) > 0:
+                    current_price = hist['Close'].iloc[-1]
+                    if len(hist) > 1:
+                        previous_price = hist['Close'].iloc[-2]
+                        change_percent = ((current_price - previous_price) / previous_price * 100) if previous_price > 0 else 0
+                    else:
+                        change_percent = 0
+                    
+                    indices[name_key] = {
+                        "value": round(current_price, 2),
+                        "change": f"{change_percent:+.2f}%"
+                    }
+        except Exception as e:
+            log(f"Error fetching market indices: {e}")
+        
+        return [TextContent(type="text", text=json.dumps(indices, default=str))]
     
     else:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]

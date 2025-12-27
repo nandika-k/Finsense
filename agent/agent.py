@@ -240,8 +240,8 @@ class FinsenseCoordinator:
         """Get current market indices"""
         result = await self.market_client.call_tool("get_market_indices", {})
         content = result["content"][0]["text"]
-        import ast
-        indices = ast.literal_eval(content)
+        import json
+        indices = json.loads(content)
         return indices
 
     async def get_stock_price(self, ticker: str) -> Dict[str, Any]:
@@ -250,8 +250,8 @@ class FinsenseCoordinator:
             "ticker": ticker
         })
         content = result["content"][0]["text"]
-        import ast
-        stock_data = ast.literal_eval(content)
+        import json
+        stock_data = json.loads(content)
         return stock_data
 
     async def get_sector_summary(self, sector: str) -> Dict[str, Any]:
@@ -260,8 +260,8 @@ class FinsenseCoordinator:
             "sector": sector
         })
         content = result["content"][0]["text"]
-        import ast
-        summary = ast.literal_eval(content)
+        import json
+        summary = json.loads(content)
         return summary
 
     #risk tools
