@@ -74,7 +74,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     log(f"call_tool: {name}")
     
     if name == "get_sector_summary":
-        sector = arguments.get("sector", "")
+        sector = arguments.get("sector", "").lower()
         # Map sectors to representative ETFs
         sector_map = {
             "technology": "XLK",
@@ -88,7 +88,22 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             "utilities": "XLU",
             "communications": "XLC"
         }
-        ticker_symbol = sector_map.get(sector.lower(), "SPY")
+        # Fallback companies for each sector
+        sector_companies = {
+            "technology": ["MSFT", "AAPL", "NVDA"],
+            "healthcare": ["JNJ", "UNH", "PFE"],
+            "financial-services": ["JPM", "BAC", "WFC"],
+            "energy": ["XOM", "CVX", "MPC"],
+            "consumer": ["AMZN", "WMT", "HD"],
+            "industrials": ["BA", "CAT", "DE"],
+            "materials": ["APD", "NEM", "FCX"],
+            "real-estate": ["AMT", "SPG", "AVB"],
+            "utilities": ["NEE", "DUK", "SO"],
+            "communications": ["META", "GOOGL", "VZ"]
+        }
+        ticker_symbol = sector_map.get(sector, "SPY")
+        # Capitalize sector name for display
+        sector_display = sector.title().replace("-", " ").title()
         
         try:
             ticker = yf.Ticker(ticker_symbol)
@@ -103,20 +118,46 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 perf_1w = ((current_price - price_1w_ago) / price_1w_ago * 100) if price_1w_ago > 0 else 0
                 perf_1m = ((current_price - price_1m_ago) / price_1m_ago * 100) if price_1m_ago > 0 else 0
                 
+                # Get top performers from sector companies
+                top_performers = []
+                companies = sector_companies.get(sector, ["N/A"])
+                for company in companies[:3]:
+                    try:
+                        comp_ticker = yf.Ticker(company)
+                        comp_hist = comp_ticker.history(period="1d")
+                        if len(comp_hist) > 1:
+                            comp_perf = ((comp_hist['Close'].iloc[-1] - comp_hist['Close'].iloc[-2]) / comp_hist['Close'].iloc[-2] * 100)
+                            top_performers.append({"ticker": company, "change": f"{comp_perf:+.2f}%"})
+                    except:
+                        pass
+                
+                # Calculate market weight as percentage of total market (SPY)
+                market_weight = "N/A"
+                try:
+                    sector_market_cap = ticker.info.get("marketCap")
+                    spy = yf.Ticker("SPY")
+                    spy_market_cap = spy.info.get("marketCap")
+                    if sector_market_cap and spy_market_cap:
+                        market_weight = f"{(sector_market_cap / spy_market_cap * 100):.2f}%"
+                except:
+                    pass
+                
                 summary = {
-                    "sector": sector,
+                    "sector": sector_display,
                     "performance_1d": f"{perf_1d:+.2f}%",
                     "performance_1w": f"{perf_1w:+.2f}%",
                     "performance_1m": f"{perf_1m:+.2f}%",
                     "current_price": round(current_price, 2),
-                    "market_cap": ticker.info.get("marketCap", "N/A"),
-                    "volume": ticker.info.get("volume", "N/A")
+                    "market_cap": f"{ticker.info.get('marketCap', 'N/A'):,}" if isinstance(ticker.info.get('marketCap'), (int, float)) else "N/A",
+                    "market_weight": market_weight,
+                    "volume": f"{ticker.info.get('volume', 'N/A'):,}" if isinstance(ticker.info.get('volume'), (int, float)) else "N/A",
+                    "top_performers": top_performers
                 }
             else:
-                summary = {"sector": sector, "error": "No data available"}
+                summary = {"sector": sector_display, "error": "No data available"}
         except Exception as e:
             log(f"Error fetching sector summary: {e}")
-            summary = {"sector": sector, "error": str(e)}
+            summary = {"sector": sector_display, "error": str(e)}
         
         return [TextContent(type="text", text=json.dumps(summary, default=str))]
     
@@ -142,8 +183,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "price": round(current_price, 2),
                     "change": f"{change:+.2f}",
                     "change_percent": f"{change_percent:+.2f}%",
-                    "volume": info.get("volume", "N/A"),
-                    "market_cap": info.get("marketCap", "N/A"),
+                    "volume": f"{info.get('volume', 'N/A'):,}" if isinstance(info.get('volume'), (int, float)) else "N/A",
+                    "market_cap": f"{info.get('marketCap', 'N/A'):,}" if isinstance(info.get('marketCap'), (int, float)) else "N/A",
                     "pe_ratio": round(info.get("trailingPE", 0), 2) if info.get("trailingPE") else "N/A"
                 }
             else:
