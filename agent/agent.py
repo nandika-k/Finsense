@@ -5,6 +5,10 @@ from pathlib import Path
 import logging
 import subprocess
 from typing import Dict, Any, List
+import warnings
+
+# Suppress Windows ProactorEventLoop pipe warnings
+warnings.filterwarnings("ignore", category=ResourceWarning, message="unclosed.*<_ProactorBasePipeTransport.*")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -145,15 +149,30 @@ class MCPClient:
         return result
     
     async def close(self):
-        """Close the connection"""
-        if self.process:
-            self.process.terminate()
+        """Close the connection gracefully"""
+        if self.process and self.process.returncode is None:
             try:
-                await asyncio.wait_for(self.process.wait(), timeout=2.0)
-            except asyncio.TimeoutError:
-                self.process.kill()
-                await self.process.wait()
-            logger.info("Server stopped")
+                # Close stdin first to signal the server to shut down
+                if self.process.stdin and not self.process.stdin.is_closing():
+                    self.process.stdin.close()
+                    await asyncio.sleep(0.1)
+                
+                # Give the process time to exit gracefully
+                try:
+                    await asyncio.wait_for(self.process.wait(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    # If it doesn't exit, terminate it
+                    self.process.terminate()
+                    try:
+                        await asyncio.wait_for(self.process.wait(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        # Last resort: kill it
+                        self.process.kill()
+                        await self.process.wait()
+                
+                logger.info("Server stopped")
+            except Exception as e:
+                logger.debug("Error during cleanup: %s", e)
 
 
 class FinsenseCoordinator:
@@ -161,6 +180,8 @@ class FinsenseCoordinator:
     
     def __init__(self):
         self.news_client: MCPClient | None = None
+        self.risk_client: MCPClient | None = None
+        self.market_client: MCPClient | None = None
 
     async def initialize(self):
         """Initialize all MCP server connections"""
@@ -171,11 +192,24 @@ class FinsenseCoordinator:
         self.news_client = MCPClient(news_server_path)
         await self.news_client.start()
         
-        # List available tools
-        tools = await self.news_client.list_tools()
-        logger.info("Available tools: %s", [t["name"] for t in tools])
+        # Connect to risk server
+        risk_server_path = BASE_DIR / "mcp_risk" / "finsense_risk.py"
+        self.risk_client = MCPClient(risk_server_path)
+        await self.risk_client.start()
         
-        logger.info("✓ Coordinator initialized")
+        # Connect to market server
+        market_server_path = BASE_DIR / "mcp_market" / "finsense_market.py"
+        self.market_client = MCPClient(market_server_path)
+        await self.market_client.start()
+        
+        # List available tools
+        news_tools = await self.news_client.list_tools()
+        risk_tools = await self.risk_client.list_tools()
+        market_tools = await self.market_client.list_tools()
+        
+        logger.info("News tools: %s", [t["name"] for t in news_tools])
+        logger.info("Risk tools: %s", [t["name"] for t in risk_tools])
+        logger.info("Market tools: %s", [t["name"] for t in market_tools])
 
     async def fetch_headlines(self, sector: str, timeframe: str) -> List[str]:
         """Fetch news headlines for a sector"""
@@ -184,9 +218,7 @@ class FinsenseCoordinator:
             "timeframe": timeframe
         })
         
-        # Parse the result
         content = result["content"][0]["text"]
-        # The result is a string representation of a list, so evaluate it
         import ast
         headlines = ast.literal_eval(content)
         return headlines
@@ -205,8 +237,21 @@ class FinsenseCoordinator:
     async def cleanup(self):
         """Clean up all connections"""
         logger.info("Shutting down...")
+        
+        # Close all clients concurrently
+        close_tasks = []
         if self.news_client:
-            await self.news_client.close()
+            close_tasks.append(self.news_client.close())
+        if self.risk_client:
+            close_tasks.append(self.risk_client.close())
+        if self.market_client:
+            close_tasks.append(self.market_client.close())
+        
+        if close_tasks:
+            await asyncio.gather(*close_tasks, return_exceptions=True)
+        
+        # Give event loop time to clean up
+        await asyncio.sleep(0.1)
 
 
 async def main():
@@ -243,4 +288,5 @@ async def main():
 
 
 if __name__ == "__main__":
+    # Run the async main function
     asyncio.run(main())
