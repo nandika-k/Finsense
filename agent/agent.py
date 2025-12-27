@@ -202,7 +202,7 @@ class FinsenseCoordinator:
         self.market_client = MCPClient(market_server_path)
         await self.market_client.start()
         
-        # List available tools
+        # List available tools from all servers
         news_tools = await self.news_client.list_tools()
         risk_tools = await self.risk_client.list_tools()
         market_tools = await self.market_client.list_tools()
@@ -211,6 +211,7 @@ class FinsenseCoordinator:
         logger.info("Risk tools: %s", [t["name"] for t in risk_tools])
         logger.info("Market tools: %s", [t["name"] for t in market_tools])
 
+    #news tools
     async def fetch_headlines(self, sector: str, timeframe: str) -> List[str]:
         """Fetch news headlines for a sector"""
         result = await self.news_client.call_tool("fetch_headlines", {
@@ -222,7 +223,7 @@ class FinsenseCoordinator:
         import ast
         headlines = ast.literal_eval(content)
         return headlines
-
+    
     async def extract_risk_themes(self, headlines: List[str]) -> List[str]:
         """Extract risk themes from headlines"""
         result = await self.news_client.call_tool("extract_risk_themes", {
@@ -233,6 +234,93 @@ class FinsenseCoordinator:
         import ast
         themes = ast.literal_eval(content)
         return themes
+
+    #market tools
+    async def get_market_indices(self) -> Dict[str, Any]:
+        """Get current market indices"""
+        result = await self.market_client.call_tool("get_market_indices", {})
+        content = result["content"][0]["text"]
+        import ast
+        indices = ast.literal_eval(content)
+        return indices
+
+    async def get_stock_price(self, ticker: str) -> Dict[str, Any]:
+        """Get stock price for a ticker"""
+        result = await self.market_client.call_tool("get_stock_price", {
+            "ticker": ticker
+        })
+        content = result["content"][0]["text"]
+        import ast
+        stock_data = ast.literal_eval(content)
+        return stock_data
+
+    async def get_sector_summary(self, sector: str) -> Dict[str, Any]:
+        """Get sector summary"""
+        result = await self.market_client.call_tool("get_sector_summary", {
+            "sector": sector
+        })
+        content = result["content"][0]["text"]
+        import ast
+        summary = ast.literal_eval(content)
+        return summary
+
+    #risk tools
+    async def compute_sector_volatility(self, sector: str, timeframe: str) -> Dict[str, Any]:
+        """Compute volatility for a sector"""
+        result = await self.risk_client.call_tool("compute_sector_volatility", {
+            "sector": sector,
+            "timeframe": timeframe
+        })
+        content = result["content"][0]["text"]
+        import ast
+        volatility = ast.literal_eval(content)
+        return volatility
+
+    async def compare_sectors(self, sector1: str, sector2: str, timeframe: str) -> Dict[str, Any]:
+        """Compare risk metrics between two sectors"""
+        result = await self.risk_client.call_tool("compare_sectors", {
+            "sector1": sector1,
+            "sector2": sector2,
+            "timeframe": timeframe
+        })
+        content = result["content"][0]["text"]
+        import ast
+        comparison = ast.literal_eval(content)
+        return comparison
+
+    async def compute_sector_correlations(self, sectors: List[str], timeframe: str) -> Dict[str, Any]:
+        """Compute correlations between sectors"""
+        result = await self.risk_client.call_tool("compute_sector_correlations", {
+            "sectors": sectors,
+            "timeframe": timeframe
+        })
+        content = result["content"][0]["text"]
+        import ast
+        correlations = ast.literal_eval(content)
+        return correlations
+
+    async def calculate_var(self, portfolio: Dict[str, Any], confidence_level: float, timeframe: str) -> Dict[str, Any]:
+        """Calculate Value at Risk (VaR) for a portfolio"""
+        result = await self.risk_client.call_tool("calculate_var", {
+            "portfolio": portfolio,
+            "confidence_level": confidence_level,
+            "timeframe": timeframe
+        })
+        content = result["content"][0]["text"]
+        import ast
+        var_data = ast.literal_eval(content)
+        return var_data
+
+    async def stress_test(self, sector: str, scenario: str) -> Dict[str, Any]:
+        """Perform stress testing on a sector or portfolio"""
+        result = await self.risk_client.call_tool("stress_test", {
+            "sector": sector,
+            "scenario": scenario
+        })
+        content = result["content"][0]["text"]
+        import ast
+        stress_results = ast.literal_eval(content)
+        return stress_results
 
     async def cleanup(self):
         """Clean up all connections"""
@@ -255,30 +343,52 @@ class FinsenseCoordinator:
 
 
 async def main():
-    """Example usage"""
+    """Example usage demonstrating market data tools"""
     coordinator = FinsenseCoordinator()
     
     try:
         await coordinator.initialize()
         
-        # Fetch headlines
+        # Get market indices
         print("\n" + "="*60)
-        print("Fetching technology sector headlines...")
+        print("Fetching Major Market Indices...")
         print("="*60)
-        headlines = await coordinator.fetch_headlines("technology", "7d")
-        for i, headline in enumerate(headlines, 1):
-            print(f"{i}. {headline}")
+        indices = await coordinator.get_market_indices()
+        for index_name, data in indices.items():
+            print(f"{index_name}: {data['value']} ({data['change']})")
         
-        # Extract risk themes
+        # Get stock prices for multiple tickers
         print("\n" + "="*60)
-        print("Extracting risk themes...")
+        print("Fetching Individual Stock Prices...")
         print("="*60)
-        themes = await coordinator.extract_risk_themes(headlines)
-        for i, theme in enumerate(themes, 1):
-            print(f"{i}. {theme}")
+        tickers = ["AAPL", "MSFT", "GOOGL", "TSLA", "NVDA"]
+        for ticker in tickers:
+            stock_data = await coordinator.get_stock_price(ticker)
+            print(f"\n{stock_data['ticker']}:")
+            print(f"  Price: ${stock_data['price']}")
+            print(f"  Change: {stock_data['change']} ({stock_data['change_percent']})")
+            print(f"  Volume: {stock_data['volume']}")
+            print(f"  Market Cap: ${stock_data['market_cap']}")
+            print(f"  P/E Ratio: {stock_data['pe_ratio']}")
+        
+        # Get sector summaries
+        print("\n" + "="*60)
+        print("Fetching Sector Summaries...")
+        print("="*60)
+        sectors = ["technology", "healthcare", "financial-services"]
+        for sector in sectors:
+            summary = await coordinator.get_sector_summary(sector)
+            print(f"\n{summary['sector']} Sector:")
+            print(f"  1-Day Performance: {summary['performance_1d']}")
+            print(f"  1-Week Performance: {summary['performance_1w']}")
+            print(f"  1-Month Performance: {summary['performance_1m']}")
+            print(f"  Market Weight: {summary.get('market_weight', 'N/A')}")
+            print(f"  Top Performers:")
+            for performer in summary.get('top_performers', [])[:3]:
+                print(f"    - {performer['ticker']}: {performer['change']}")
         
         print("\n" + "="*60)
-        print("✓ Analysis complete")
+        print("✓ Market analysis complete")
         print("="*60 + "\n")
         
     except Exception as e:
