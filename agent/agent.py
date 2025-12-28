@@ -272,8 +272,7 @@ class FinsenseCoordinator:
             "timeframe": timeframe
         })
         content = result["content"][0]["text"]
-        import ast
-        volatility = ast.literal_eval(content)
+        volatility = json.loads(content)
         return volatility
 
     async def compare_sectors(self, sector1: str, sector2: str, timeframe: str) -> Dict[str, Any]:
@@ -284,8 +283,7 @@ class FinsenseCoordinator:
             "timeframe": timeframe
         })
         content = result["content"][0]["text"]
-        import ast
-        comparison = ast.literal_eval(content)
+        comparison = json.loads(content)
         return comparison
 
     async def compute_sector_correlations(self, sectors: List[str], timeframe: str) -> Dict[str, Any]:
@@ -295,32 +293,23 @@ class FinsenseCoordinator:
             "timeframe": timeframe
         })
         content = result["content"][0]["text"]
-        import ast
-        correlations = ast.literal_eval(content)
+        correlations = json.loads(content)
         return correlations
 
-    async def calculate_var(self, portfolio: Dict[str, Any], confidence_level: float, timeframe: str) -> Dict[str, Any]:
+    async def calculate_var(self, portfolio: Dict[str, Any], confidence_level: float, timeframe: str, portfolio_value: float = None) -> Dict[str, Any]:
         """Calculate Value at Risk (VaR) for a portfolio"""
-        result = await self.risk_client.call_tool("calculate_var", {
+        params = {
             "portfolio": portfolio,
             "confidence_level": confidence_level,
             "timeframe": timeframe
-        })
+        }
+        if portfolio_value:
+            params["portfolio_value"] = portfolio_value
+        
+        result = await self.risk_client.call_tool("calculate_var", params)
         content = result["content"][0]["text"]
-        import ast
-        var_data = ast.literal_eval(content)
+        var_data = json.loads(content)
         return var_data
-
-    async def stress_test(self, sector: str, scenario: str) -> Dict[str, Any]:
-        """Perform stress testing on a sector or portfolio"""
-        result = await self.risk_client.call_tool("stress_test", {
-            "sector": sector,
-            "scenario": scenario
-        })
-        content = result["content"][0]["text"]
-        import ast
-        stress_results = ast.literal_eval(content)
-        return stress_results
 
     async def cleanup(self):
         """Clean up all connections"""
@@ -348,7 +337,9 @@ async def main():
     
     try:
         await coordinator.initialize()
-        
+        '''
+        testing finsense_market.py
+
         # Get market indices
         print("\n" + "="*60)
         print("Fetching Major Market Indices...")
@@ -386,6 +377,187 @@ async def main():
             print(f"  Top Performers:")
             for performer in summary.get('top_performers', [])[:3]:
                 print(f"       - {performer['ticker']}")
+        '''
+
+        '''
+        testing finsense_risk.py
+        
+        # Test sector volatility calculations
+        print("\n" + "="*60)
+        print("Computing Sector Volatility...")
+        print("="*60)
+        test_sectors = ["technology", "healthcare", "energy"]
+        for sector in test_sectors:
+            try:
+                volatility = await coordinator.compute_sector_volatility(sector, "1y")
+                print(f"\n{sector.upper()} Sector Volatility (1 year):")
+                print(f"  Ticker: {volatility.get('ticker', 'N/A')}")
+                print(f"  Annualized Volatility: {volatility.get('annualized_volatility', 'N/A')}")
+                print(f"  Realized Volatility: {volatility.get('realized_volatility', 'N/A')}")
+                print(f"  Rolling 30d Volatility: {volatility.get('rolling_30d_volatility', 'N/A')}")
+                print(f"  Historical Average: {volatility.get('historical_average', 'N/A')}")
+                print(f"  Max Drawdown: {volatility.get('max_drawdown', 'N/A')}")
+                print(f"  Trend: {volatility.get('trend', 'N/A')}")
+                print(f"  Percentile: {volatility.get('percentile', 'N/A')}")
+                if 'market_volatility' in volatility:
+                    print(f"  Market Volatility (SPY): {volatility.get('market_volatility', 'N/A')}")
+                    print(f"  Relative to Market: {volatility.get('relative_to_market', 'N/A')}")
+            except Exception as e:
+                print(f"\nError computing volatility for {sector}: {e}")
+        
+        # Test sector comparison
+        print("\n" + "="*60)
+        print("Comparing Sectors...")
+        print("="*60)
+        try:
+            comparison = await coordinator.compare_sectors("technology", "healthcare", "1y")
+            print(f"\n{comparison.get('sector1', '').upper()} vs {comparison.get('sector2', '').upper()}:")
+            print(f"  Timeframe: {comparison.get('timeframe', 'N/A')}")
+            
+            vol_comp = comparison.get('volatility_comparison', {})
+            print(f"\n  Volatility:")
+            print(f"    {comparison.get('sector1', '')}: {vol_comp.get(comparison.get('sector1', ''), 'N/A')}")
+            print(f"    {comparison.get('sector2', '')}: {vol_comp.get(comparison.get('sector2', ''), 'N/A')}")
+            print(f"    Difference: {vol_comp.get('difference', 'N/A')}")
+            print(f"    Lower volatility: {vol_comp.get('lower_volatility', 'N/A')}")
+            
+            drawdown = comparison.get('max_drawdown', {})
+            print(f"\n  Max Drawdown:")
+            print(f"    {comparison.get('sector1', '')}: {drawdown.get(comparison.get('sector1', ''), 'N/A')}")
+            print(f"    {comparison.get('sector2', '')}: {drawdown.get(comparison.get('sector2', ''), 'N/A')}")
+            print(f"    Lower drawdown: {drawdown.get('lower_drawdown', 'N/A')}")
+            
+            returns = comparison.get('total_return', {})
+            print(f"\n  Total Return:")
+            print(f"    {comparison.get('sector1', '')}: {returns.get(comparison.get('sector1', ''), 'N/A')}")
+            print(f"    {comparison.get('sector2', '')}: {returns.get(comparison.get('sector2', ''), 'N/A')}")
+            print(f"    Higher return: {returns.get('higher_return', 'N/A')}")
+            
+            sharpe = comparison.get('sharpe_ratio', {})
+            print(f"\n  Sharpe Ratio (Risk-Adjusted):")
+            print(f"    {comparison.get('sector1', '')}: {sharpe.get(comparison.get('sector1', ''), 'N/A')}")
+            print(f"    {comparison.get('sector2', '')}: {sharpe.get(comparison.get('sector2', ''), 'N/A')}")
+            print(f"    Higher Sharpe: {sharpe.get('higher_sharpe', 'N/A')}")
+            
+            beta = comparison.get('beta', {})
+            print(f"\n  Beta (Market Sensitivity):")
+            print(f"    {comparison.get('sector1', '')}: {beta.get(comparison.get('sector1', ''), 'N/A')}")
+            print(f"    {comparison.get('sector2', '')}: {beta.get(comparison.get('sector2', ''), 'N/A')}")
+            
+            print(f"\n  Recommendation: {comparison.get('recommendation', 'N/A')}")
+        except Exception as e:
+            print(f"\nError comparing sectors: {e}")
+        '''
+        # Test sector correlations
+        print("\n" + "="*60)
+        print("Computing Sector Correlations...")
+        print("="*60)
+        try:
+            test_sectors = ["technology", "healthcare", "energy", "financial-services"]
+            correlations = await coordinator.compute_sector_correlations(test_sectors, "1y")
+            
+            print(f"\nSector Correlation Analysis ({correlations.get('timeframe', 'N/A')}):")
+            print(f"  Sectors analyzed: {', '.join(correlations.get('sectors_analyzed', []))}")
+            print(f"  Data points: {correlations.get('data_points', 'N/A')}")
+            print(f"  Average correlation: {correlations.get('average_correlation', 'N/A')}")
+            
+            print(f"\n  Diversification Score: {correlations.get('diversification_score', 'N/A')}")
+            print(f"  {correlations.get('diversification_interpretation', 'N/A')}")
+            
+            highest = correlations.get('highest_correlation', {})
+            print(f"\n  Highest Correlation:")
+            print(f"    {highest.get('pair', 'N/A')}")
+            print(f"    {highest.get('interpretation', 'N/A')}")
+            
+            lowest = correlations.get('lowest_correlation', {})
+            print(f"\n  Lowest Correlation (Best Diversification):")
+            print(f"    {lowest.get('pair', 'N/A')}")
+            print(f"    {lowest.get('interpretation', 'N/A')}")
+            
+            insights = correlations.get('insights', {})
+            print(f"\n  Sectors Moving Together (correlation > 0.6):")
+            moving_together = insights.get('sectors_moving_together', [])
+            if moving_together and moving_together[0] != "None identified (all correlations < 0.6)":
+                for pair in moving_together:
+                    print(f"    - {pair}")
+            else:
+                print(f"    - {moving_together[0] if moving_together else 'None identified'}")
+                print(f"    (Note: Check correlation matrix below for actual values)")
+            
+            print(f"\n  Best Diversification Opportunities (correlation < 0.4):")
+            diversification = insights.get('best_diversification_opportunities', [])
+            if diversification and diversification[0] != "None identified (all correlations > 0.4)":
+                for pair in diversification:
+                    print(f"    - {pair}")
+            else:
+                print(f"    - {diversification[0] if diversification else 'None identified'}")
+                print(f"    (Note: Check correlation matrix below for actual values)")
+            
+            print(f"\n  Correlation Matrix:")
+            corr_matrix = correlations.get('correlation_matrix', {})
+            for pair, value in list(corr_matrix.items())[:6]:  # Show first 6 pairs
+                print(f"    {pair}: {value:.3f}")
+            if len(corr_matrix) > 6:
+                print(f"    ... and {len(corr_matrix) - 6} more pairs")
+                
+        except Exception as e:
+            print(f"\nError computing sector correlations: {e}")
+        
+        # Test VaR calculation
+        print("\n" + "="*60)
+        print("Calculating Value at Risk (VaR)...")
+        print("="*60)
+        try:
+            # Test portfolio with sector allocations
+            test_portfolio = {
+                "technology": 0.4,
+                "healthcare": 0.3,
+                "energy": 0.3
+            }
+            portfolio_value = 1000000  # $1M portfolio
+            
+            var_result = await coordinator.calculate_var(
+                test_portfolio, 
+                confidence_level=0.95, 
+                timeframe="1y",
+                portfolio_value=portfolio_value
+            )
+            
+            print(f"\nPortfolio VaR Analysis:")
+            print(f"  Confidence Level: {var_result.get('confidence_level', 'N/A')}")
+            print(f"  Method: {var_result.get('method', 'N/A')}")
+            print(f"  Data Points: {var_result.get('data_points', 'N/A')}")
+            
+            print(f"\n  Portfolio Holdings:")
+            holdings = var_result.get('portfolio_holdings', {})
+            for holding, info in holdings.items():
+                print(f"    {holding}: {info.get('weight', 'N/A')} ({info.get('ticker', 'N/A')})")
+            
+            var_pct = var_result.get('var_percentage', {})
+            print(f"\n  VaR (Percentage):")
+            print(f"    1 Day: {var_pct.get('1_day', 'N/A')}")
+            print(f"    1 Week: {var_pct.get('1_week', 'N/A')}")
+            print(f"    1 Month: {var_pct.get('1_month', 'N/A')}")
+            
+            if 'var_absolute' in var_result:
+                var_abs = var_result.get('var_absolute', {})
+                print(f"\n  VaR (Absolute - ${portfolio_value:,} portfolio):")
+                print(f"    1 Day: {var_abs.get('1_day', 'N/A')}")
+                print(f"    1 Week: {var_abs.get('1_week', 'N/A')}")
+                print(f"    1 Month: {var_abs.get('1_month', 'N/A')}")
+            
+            stats = var_result.get('portfolio_statistics', {})
+            print(f"\n  Portfolio Statistics:")
+            print(f"    Mean Daily Return: {stats.get('mean_daily_return', 'N/A')}")
+            print(f"    Volatility: {stats.get('volatility', 'N/A')}")
+            print(f"    Worst Day: {stats.get('worst_day', 'N/A')}")
+            print(f"    Best Day: {stats.get('best_day', 'N/A')}")
+            
+            print(f"\n  Expected Shortfall (Conditional VaR): {var_result.get('expected_shortfall', 'N/A')}")
+            print(f"\n  Interpretation: {var_result.get('interpretation', 'N/A')}")
+            
+        except Exception as e:
+            print(f"\nError calculating VaR: {e}")
         
         print("\n" + "="*60)
         print("✓ Market analysis complete")
