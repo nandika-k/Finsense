@@ -385,7 +385,7 @@ async def main():
             print(f"  Market Weight: {summary.get('market_weight', 'N/A')}")
             print(f"  Top Performers:")
             for performer in summary.get('top_performers', [])[:3]:
-                print(f"    - {performer['ticker']}: {performer['change']}")
+                print(f"       - {performer['ticker']}")
         
         print("\n" + "="*60)
         print("✓ Market analysis complete")

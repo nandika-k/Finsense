@@ -124,12 +124,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 for company in companies[:3]:
                     try:
                         comp_ticker = yf.Ticker(company)
-                        comp_hist = comp_ticker.history(period="1d")
+                        comp_hist = comp_ticker.history(period="5d")
                         if len(comp_hist) > 1:
                             comp_perf = ((comp_hist['Close'].iloc[-1] - comp_hist['Close'].iloc[-2]) / comp_hist['Close'].iloc[-2] * 100)
-                            top_performers.append({"ticker": company, "change": f"{comp_perf:+.2f}%"})
-                    except:
-                        pass
+                            top_performers.append({"ticker": company})
+                    except Exception as e:
+                        log(f"Error fetching {company} data: {e}")
                 
                 # Calculate market weight as percentage of total market (SPY)
                 market_weight = "N/A"
