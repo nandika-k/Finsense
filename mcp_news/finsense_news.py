@@ -342,23 +342,132 @@ SECTOR_RISKS = {
 
 # --- Helper Functions for News Fetching ---
 
-def get_sector_keywords(sector: str) -> List[str]:
-    """Get search keywords for a sector to query news"""
+def get_sector_keywords(sector: str) -> Dict[str, List[str]]:
+    """Get highly specific search keywords for each sector"""
     sector_keywords_map = {
-        "technology": ["technology", "tech", "software", "semiconductor", "AI", "cloud", "apple", "microsoft", "google", "nvidia", "meta"],
-        "healthcare": ["healthcare", "pharmaceutical", "biotech", "medical", "FDA", "drug", "vaccine", "pfizer"],
-        "financial-services": ["banking", "finance", "financial", "bank", "credit", "lending", "JPMorgan", "goldman"],
-        "energy": ["energy", "oil", "crude", "petroleum", "natural gas", "renewable", "exxon", "chevron"],
-        "consumer": ["retail", "consumer", "shopping", "e-commerce", "amazon", "walmart"],
-        "consumer-discretionary": ["retail", "consumer discretionary", "luxury", "automotive", "tesla", "nike"],
-        "industrials": ["industrial", "manufacturing", "machinery", "aerospace", "defense", "boeing"],
-        "materials": ["materials", "mining", "steel", "chemicals", "commodities"],
-        "real-estate": ["real estate", "property", "REIT", "housing", "commercial"],
-        "utilities": ["utility", "electric", "power", "energy utility", "grid"],
-        "communications": ["telecom", "communications", "5G", "wireless", "broadband", "verizon"],
-        "consumer-staples": ["consumer staples", "food", "beverage", "household products", "procter"]
+        "technology": {
+            "required": ["technology", "tech", "semiconductor", "chip", "AI", "software", "cloud", "data center"],
+            "companies": ["Apple", "Microsoft", "Google", "Alphabet", "NVIDIA", "Meta", "Amazon AWS", "Intel", "AMD", "TSMC", "Samsung", "Qualcomm", "Oracle", "Salesforce", "Adobe", "Tesla"],
+            "terms": ["GPU", "CPU", "artificial intelligence", "machine learning", "chip shortage", "fab", "foundry", "silicon", "processor", "cloud computing", "SaaS", "enterprise software", "cybersecurity", "5G", "quantum computing", "robotics"]
+        },
+        "healthcare": {
+            "required": ["healthcare", "pharmaceutical", "biotech", "drug", "FDA", "clinical"],
+            "companies": ["Pfizer", "Moderna", "Johnson & Johnson", "Eli Lilly", "Merck", "AbbVie", "Bristol Myers", "Amgen", "Gilead", "Regeneron"],
+            "terms": ["vaccine", "clinical trial", "drug approval", "biosimilar", "gene therapy", "CAR-T", "obesity drug", "GLP-1", "oncology", "rare disease", "medical device"]
+        },
+        "financial-services": {
+            "required": ["bank", "banking", "financial", "finance", "Fed", "interest rate"],
+            "companies": ["JPMorgan", "Bank of America", "Wells Fargo", "Citigroup", "Goldman Sachs", "Morgan Stanley", "BlackRock", "Visa", "Mastercard"],
+            "terms": ["Federal Reserve", "loan", "credit", "mortgage", "trading", "investment banking", "wealth management", "fintech", "payment", "capital markets", "deposit"]
+        },
+        "energy": {
+            "required": ["oil", "energy", "crude", "natural gas", "petroleum", "renewable"],
+            "companies": ["ExxonMobil", "Chevron", "ConocoPhillips", "Shell", "BP", "TotalEnergies", "NextEra Energy", "Occidental"],
+            "terms": ["barrel", "WTI", "Brent", "OPEC", "refinery", "pipeline", "LNG", "wind", "solar", "EV", "electric vehicle", "battery"]
+        },
+        "consumer": {
+            "required": ["retail", "consumer", "sales", "shopping"],
+            "companies": ["Amazon", "Walmart", "Target", "Costco", "Home Depot", "Lowe's", "Nike", "Starbucks", "McDonald's"],
+            "terms": ["e-commerce", "same-store sales", "Black Friday", "holiday shopping", "inventory", "margin", "foot traffic", "omnichannel"]
+        },
+        "consumer-discretionary": {
+            "required": ["retail", "consumer discretionary", "automotive", "luxury"],
+            "companies": ["Tesla", "Ford", "GM", "Nike", "Lululemon", "LVMH", "Disney", "Netflix", "Booking"],
+            "terms": ["electric vehicle", "EV sales", "SUV", "pickup truck", "streaming", "theme park", "hotel", "travel", "restaurant"]
+        },
+        "industrials": {
+            "required": ["industrial", "manufacturing", "aerospace", "defense"],
+            "companies": ["Boeing", "Lockheed Martin", "Raytheon", "General Electric", "Caterpillar", "Deere", "3M", "Honeywell"],
+            "terms": ["aircraft", "defense contract", "construction equipment", "factory", "automation", "supply chain", "logistics", "freight"]
+        },
+        "materials": {
+            "required": ["materials", "mining", "metals", "chemicals"],
+            "companies": ["Freeport-McMoRan", "Newmont", "Dow", "DuPont", "Nucor", "Steel Dynamics"],
+            "terms": ["copper", "gold", "steel", "aluminum", "lithium", "commodity", "ore", "industrial metals", "rare earth"]
+        },
+        "real-estate": {
+            "required": ["real estate", "property", "REIT", "housing", "mortgage"],
+            "companies": ["Prologis", "American Tower", "Crown Castle", "Simon Property", "Realty Income"],
+            "terms": ["commercial real estate", "office", "warehouse", "apartment", "multifamily", "rent", "occupancy", "cap rate"]
+        },
+        "utilities": {
+            "required": ["utility", "electric", "power", "grid", "energy utility"],
+            "companies": ["NextEra Energy", "Duke Energy", "Southern Company", "Dominion Energy", "American Electric Power"],
+            "terms": ["electricity", "natural gas utility", "transmission", "distribution", "renewable energy", "nuclear", "power plant"]
+        },
+        "communications": {
+            "required": ["telecom", "wireless", "broadband", "5G", "communications"],
+            "companies": ["Verizon", "AT&T", "T-Mobile", "Comcast", "Charter Communications"],
+            "terms": ["spectrum", "fiber", "cable", "satellite", "network", "subscriber", "ARPU", "tower"]
+        },
+        "consumer-staples": {
+            "required": ["consumer staples", "food", "beverage", "packaged goods"],
+            "companies": ["Procter & Gamble", "Coca-Cola", "PepsiCo", "Walmart", "Costco", "Mondelez", "Kraft Heinz"],
+            "terms": ["CPG", "grocery", "private label", "pricing power", "volume", "brand", "distribution"]
+        }
     }
-    return sector_keywords_map.get(sector.lower(), [sector])
+    return sector_keywords_map.get(sector.lower(), {
+        "required": [sector],
+        "companies": [],
+        "terms": []
+    })
+
+def get_sector_rss_feeds(sector: str) -> List[str]:
+    """Get sector-specific RSS feeds"""
+    base_feeds = [
+        "https://feeds.finance.yahoo.com/rss/2.0/headline",
+        "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+        "https://feeds.reuters.com/reuters/businessNews",
+    ]
+    
+    sector_feeds = {
+        "technology": [
+            "https://www.cnbc.com/id/19854910/device/rss/rss.html",  # CNBC Tech
+            "https://feeds.reuters.com/reuters/technologyNews",
+        ],
+        "healthcare": [
+            "https://feeds.reuters.com/reuters/healthNews",
+        ],
+        "financial-services": [
+            "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+        ],
+        "energy": [
+            "https://feeds.reuters.com/reuters/energy",
+        ]
+    }
+    
+    return base_feeds + sector_feeds.get(sector.lower(), [])
+
+def analyze_sentiment(title: str, description: str, sector: str) -> str:
+    """Analyze sentiment of headline for the sector (positive/negative/neutral)"""
+    text = f"{title} {description}".lower()
+    
+    # Positive indicators
+    positive_words = [
+        "surge", "jump", "rally", "gain", "rise", "climb", "soar", "boom", "growth",
+        "profit", "beat", "exceed", "outperform", "record", "high", "breakthrough",
+        "strong", "robust", "recovery", "innovation", "launch", "success", "win",
+        "approval", "deal", "acquisition", "expansion", "upgrade", "bullish"
+    ]
+    
+    # Negative indicators
+    negative_words = [
+        "plunge", "drop", "fall", "decline", "tumble", "crash", "loss", "miss",
+        "underperform", "weak", "concern", "worry", "fear", "risk", "threat",
+        "crisis", "shortage", "disruption", "delay", "cut", "layoff", "downturn",
+        "recession", "investigation", "lawsuit", "fine", "penalty", "bearish",
+        "warning", "downgrade", "slump", "pressure"
+    ]
+    
+    pos_count = sum(1 for word in positive_words if word in text)
+    neg_count = sum(1 for word in negative_words if word in text)
+    
+    if pos_count > neg_count and pos_count >= 1:
+        return "positive"
+    elif neg_count > pos_count and neg_count >= 1:
+        return "negative"
+    else:
+        return "neutral"
 
 def parse_timeframe_to_days(timeframe: str) -> int:
     """Parse timeframe string to number of days"""
@@ -378,33 +487,42 @@ def parse_timeframe_to_days(timeframe: str) -> int:
     else:
         return 7  # Default to 1 week
 
+def is_relevant_to_sector(title: str, description: str, keywords: Dict[str, List[str]]) -> tuple[bool, int]:
+    """Check if headline is relevant to sector with scoring"""
+    text = f"{title} {description}".lower()
+    score = 0
+    
+    # Required keywords (must have at least one)
+    required_match = any(kw.lower() in text for kw in keywords.get("required", []))
+    if not required_match:
+        return False, 0
+    score += 10
+    
+    # Company mentions (high value)
+    company_matches = sum(1 for company in keywords.get("companies", []) if company.lower() in text)
+    score += company_matches * 5
+    
+    # Technical terms (medium value)
+    term_matches = sum(1 for term in keywords.get("terms", []) if term.lower() in text)
+    score += term_matches * 2
+    
+    return score >= 10, score
+
 def fetch_headlines_from_rss(sector: str, days: int, max_results: int = 20) -> List[Dict]:
     """
-    Fetch headlines from financial news RSS feeds.
-    Uses free RSS feeds - no API key required.
+    Fetch sector-specific headlines from RSS feeds with sentiment analysis.
     """
     headlines = []
     keywords = get_sector_keywords(sector)
     
-    log(f"Fetching headlines for sector: {sector}, keywords: {keywords[:3]}...")
+    log(f"Fetching headlines for sector: {sector}")
+    log(f"Required keywords: {keywords.get('required', [])[:5]}")
+    log(f"Companies: {keywords.get('companies', [])[:5]}")
     
-    # Enhanced RSS feeds with better coverage
-    rss_feeds = [
-        "https://feeds.finance.yahoo.com/rss/2.0/headline",
-        "https://www.cnbc.com/id/100003114/device/rss/rss.html",
-        "https://feeds.reuters.com/reuters/businessNews",
-        "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",  # WSJ Markets
-    ]
+    rss_feeds = get_sector_rss_feeds(sector)
     
-    # More inclusive risk keywords
-    risk_keywords = ["risk", "disruption", "crisis", "threat", "concern", "warning", 
-                     "volatility", "uncertainty", "challenge", "pressure", "decline", 
-                     "drop", "fall", "surge", "spike", "earnings", "revenue", "profit",
-                     "loss", "growth", "market", "stock", "shares"]
-    
-    # Headers to avoid being blocked
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
     
     for feed_url in rss_feeds:
@@ -419,15 +537,12 @@ def fetch_headlines_from_rss(sector: str, days: int, max_results: int = 20) -> L
                 log(f"Failed to fetch {feed_url}: HTTP {response.status_code}")
                 continue
             
-            log(f"Successfully fetched {feed_url}, parsing XML...")
-            
-            # Use html.parser instead of xml (more reliable, built-in)
             soup = BeautifulSoup(response.content, 'html.parser')
             items = soup.find_all('item')
             
             log(f"Found {len(items)} items in feed")
             
-            for item in items[:max_results * 2]:  # Process more items to find relevant ones
+            for item in items[:max_results * 3]:
                 if len(headlines) >= max_results:
                     break
                 
@@ -447,45 +562,35 @@ def fetch_headlines_from_rss(sector: str, days: int, max_results: int = 20) -> L
                 # Clean HTML tags from description
                 desc_text = re.sub(r'<[^>]+>', '', desc_text)
                 
-                # Check if headline is relevant (more lenient matching)
-                title_lower = title_text.lower()
-                desc_lower = desc_text.lower()
-                combined_text = f"{title_lower} {desc_lower}"
+                # Check relevance with scoring
+                is_relevant, relevance_score = is_relevant_to_sector(title_text, desc_text, keywords)
                 
-                # Match against sector keywords OR risk keywords (more inclusive)
-                sector_match = any(keyword.lower() in combined_text for keyword in keywords)
-                risk_match = any(risk_kw in combined_text for risk_kw in risk_keywords)
-                
-                # Accept if either sector-relevant OR contains risk/business keywords
-                is_relevant = sector_match or risk_match
-                
-                if is_relevant:
+                if is_relevant and relevance_score >= 10:
+                    # Analyze sentiment
+                    sentiment = analyze_sentiment(title_text, desc_text, sector)
+                    
                     source = feed_url.split('/')[2] if '/' in feed_url else "unknown"
                     headlines.append({
                         "title": title_text,
                         "url": link_text,
                         "date": pub_date_text,
-                        "description": desc_text[:200],  # Truncate long descriptions
-                        "source": source
+                        "description": desc_text[:200],
+                        "source": source,
+                        "relevance_score": relevance_score,
+                        "sentiment": sentiment
                     })
-                    log(f"Added headline: {title_text[:60]}...")
+                    log(f"Added ({sentiment}): {title_text[:60]}... (score: {relevance_score})")
                     
-        except requests.exceptions.Timeout:
-            log(f"Timeout fetching from {feed_url}")
-            continue
-        except requests.exceptions.RequestException as e:
-            log(f"Request error fetching from {feed_url}: {e}")
-            continue
         except Exception as e:
             log(f"Error parsing {feed_url}: {e}")
             continue
     
     log(f"Total headlines collected: {len(headlines)}")
     
-    # Remove duplicates based on title
+    # Remove duplicates and sort by relevance
     seen_titles = set()
     unique_headlines = []
-    for headline in headlines:
+    for headline in sorted(headlines, key=lambda x: x["relevance_score"], reverse=True):
         title_lower = headline["title"].lower()
         if title_lower not in seen_titles:
             seen_titles.add(title_lower)
@@ -517,7 +622,8 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
                 "url": "",
                 "date": "",
                 "source": "",
-                "description": ""
+                "description": "",
+                "sentiment": "neutral"
             })
         elif isinstance(headline, dict):
             normalized_headlines.append({
@@ -525,7 +631,8 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
                 "url": headline.get("url", ""),
                 "date": headline.get("date", ""),
                 "source": headline.get("source", ""),
-                "description": headline.get("description", "")
+                "description": headline.get("description", ""),
+                "sentiment": headline.get("sentiment", "neutral")
             })
     
     # Get sector risk knowledge base if sector provided
@@ -569,14 +676,14 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
     for idx, article in enumerate(normalized_headlines):
         title = article.get("title", "")
         description = article.get("description", "")
+        sentiment = article.get("sentiment", "neutral")
         combined_text = f"{title} {description}".lower()
         
         log(f"Analyzing article {idx+1}: {title[:60]}...")
         article_matched = False
         
-        # First pass: Match against general risk categories (easier to match)
+        # First pass: Match against general risk categories
         for category, keywords in risk_category_keywords.items():
-            # Check if ANY keyword appears in the text
             matched_keywords = [kw for kw in keywords if kw in combined_text]
             
             if matched_keywords:
@@ -585,7 +692,6 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
                 
                 general_risk = f"{category.replace('_', ' ').title()} concerns"
                 
-                # Initialize risk if not exists
                 if general_risk not in identified_risks:
                     identified_risks[general_risk] = {
                         "risk_description": general_risk,
@@ -594,12 +700,12 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
                         "article_count": 0
                     }
                 
-                # Add article to this risk
                 article_ref = {
                     "title": title,
                     "url": article.get("url", ""),
                     "date": article.get("date", ""),
                     "source": article.get("source", ""),
+                    "sentiment": sentiment,
                     "relevance": "high" if len(matched_keywords) >= 3 else "medium",
                     "matched_keywords": matched_keywords[:5]
                 }
@@ -608,23 +714,19 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
                 identified_risks[general_risk]["article_count"] += 1
                 risk_category_counts[category] += 1
         
-        # Second pass: Try to match specific structural risks (more specific)
+        # Second pass: Match specific structural risks
         if sector_risks:
             for category, risk_list in sector_risks.items():
                 for structural_risk in risk_list:
-                    # Extract key terms from structural risk description
-                    # Focus on nouns/key concepts (skip common words)
                     skip_words = {'and', 'or', 'the', 'for', 'from', 'with', 'during', 'in', 'on', 'at', 'to', 'of'}
                     risk_keywords = [
                         kw for kw in re.findall(r'\b\w+\b', structural_risk.lower()) 
                         if len(kw) > 3 and kw not in skip_words
                     ]
                     
-                    # Count matches
                     matches = sum(1 for kw in risk_keywords if kw in combined_text)
                     match_ratio = matches / len(risk_keywords) if risk_keywords else 0
                     
-                    # Very lenient: just need 1 good keyword match for longer risks, or 15% match
                     if matches >= 1 and (match_ratio >= 0.15 or matches >= 2):
                         log(f"  - Matched structural risk: {structural_risk[:50]}... ({matches}/{len(risk_keywords)} keywords)")
                         article_matched = True
@@ -642,6 +744,7 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
                             "url": article.get("url", ""),
                             "date": article.get("date", ""),
                             "source": article.get("source", ""),
+                            "sentiment": sentiment,
                             "relevance": "high" if match_ratio >= 0.3 or matches >= 3 else "medium"
                         }
                         identified_risks[structural_risk]["articles"].append(article_ref)
@@ -774,7 +877,7 @@ async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="fetch_headlines",
-            description="Fetch news headlines",
+            description="Fetch sector-specific news headlines with sentiment analysis (positive/negative/neutral)",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -834,11 +937,17 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     })
                 )]
             
+            # Calculate sentiment distribution
+            sentiment_counts = {"positive": 0, "negative": 0, "neutral": 0}
+            for h in headlines:
+                sentiment_counts[h.get("sentiment", "neutral")] += 1
+            
             result = {
                 "sector": sector,
                 "timeframe": timeframe,
                 "days_covered": days,
                 "headline_count": len(headlines),
+                "sentiment_distribution": sentiment_counts,
                 "headlines": headlines
             }
             
