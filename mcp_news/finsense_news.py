@@ -15,23 +15,17 @@ from bs4 import BeautifulSoup
 # Ensure stdout is unbuffered
 sys.stdout.reconfigure(line_buffering=True)
 
-# Only log to file if DEBUG environment variable is set
-if os.getenv("MCP_DEBUG"):
-    import logging
-    from pathlib import Path
-    LOG_FILE = Path(__file__).parent / "finsense_news.log"
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[logging.FileHandler(LOG_FILE, mode='w')]
-    )
-    logger = logging.getLogger(__name__)
-    
-    def log(msg):
-        logger.debug(msg)
-else:
-    def log(msg):
-        pass
+# Enhanced logging - always log to stderr for debugging
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    stream=sys.stderr
+)
+logger = logging.getLogger(__name__)
+
+def log(msg):
+    logger.info(msg)
 
 # --- MCP Server Initialization ---
 app = Server("finsense-news")
@@ -351,18 +345,18 @@ SECTOR_RISKS = {
 def get_sector_keywords(sector: str) -> List[str]:
     """Get search keywords for a sector to query news"""
     sector_keywords_map = {
-        "technology": ["technology", "tech", "software", "semiconductor", "AI", "cloud"],
-        "healthcare": ["healthcare", "pharmaceutical", "biotech", "medical", "FDA", "drug"],
-        "financial-services": ["banking", "finance", "financial", "bank", "credit", "lending"],
-        "energy": ["energy", "oil", "crude", "petroleum", "natural gas", "renewable"],
-        "consumer": ["retail", "consumer", "shopping", "e-commerce"],
-        "consumer-discretionary": ["retail", "consumer discretionary", "luxury", "automotive"],
-        "industrials": ["industrial", "manufacturing", "machinery", "aerospace", "defense"],
+        "technology": ["technology", "tech", "software", "semiconductor", "AI", "cloud", "apple", "microsoft", "google", "nvidia", "meta"],
+        "healthcare": ["healthcare", "pharmaceutical", "biotech", "medical", "FDA", "drug", "vaccine", "pfizer"],
+        "financial-services": ["banking", "finance", "financial", "bank", "credit", "lending", "JPMorgan", "goldman"],
+        "energy": ["energy", "oil", "crude", "petroleum", "natural gas", "renewable", "exxon", "chevron"],
+        "consumer": ["retail", "consumer", "shopping", "e-commerce", "amazon", "walmart"],
+        "consumer-discretionary": ["retail", "consumer discretionary", "luxury", "automotive", "tesla", "nike"],
+        "industrials": ["industrial", "manufacturing", "machinery", "aerospace", "defense", "boeing"],
         "materials": ["materials", "mining", "steel", "chemicals", "commodities"],
         "real-estate": ["real estate", "property", "REIT", "housing", "commercial"],
         "utilities": ["utility", "electric", "power", "energy utility", "grid"],
-        "communications": ["telecom", "communications", "5G", "wireless", "broadband"],
-        "consumer-staples": ["consumer staples", "food", "beverage", "household products"]
+        "communications": ["telecom", "communications", "5G", "wireless", "broadband", "verizon"],
+        "consumer-staples": ["consumer staples", "food", "beverage", "household products", "procter"]
     }
     return sector_keywords_map.get(sector.lower(), [sector])
 
@@ -392,74 +386,101 @@ def fetch_headlines_from_rss(sector: str, days: int, max_results: int = 20) -> L
     headlines = []
     keywords = get_sector_keywords(sector)
     
-    # Financial news RSS feeds (free, no API key)
+    log(f"Fetching headlines for sector: {sector}, keywords: {keywords[:3]}...")
+    
+    # Enhanced RSS feeds with better coverage
     rss_feeds = [
         "https://feeds.finance.yahoo.com/rss/2.0/headline",
         "https://www.cnbc.com/id/100003114/device/rss/rss.html",
         "https://feeds.reuters.com/reuters/businessNews",
+        "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",  # WSJ Markets
     ]
     
+    # More inclusive risk keywords
     risk_keywords = ["risk", "disruption", "crisis", "threat", "concern", "warning", 
-                     "volatility", "uncertainty", "challenge", "pressure", "decline", "drop"]
+                     "volatility", "uncertainty", "challenge", "pressure", "decline", 
+                     "drop", "fall", "surge", "spike", "earnings", "revenue", "profit",
+                     "loss", "growth", "market", "stock", "shares"]
     
-    try:
-        for feed_url in rss_feeds:
-            if len(headlines) >= max_results:
-                break
+    # Headers to avoid being blocked
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
+    for feed_url in rss_feeds:
+        if len(headlines) >= max_results:
+            break
+        
+        try:
+            log(f"Fetching from: {feed_url}")
+            response = requests.get(feed_url, timeout=15, headers=headers)
+            
+            if response.status_code != 200:
+                log(f"Failed to fetch {feed_url}: HTTP {response.status_code}")
+                continue
+            
+            log(f"Successfully fetched {feed_url}, parsing XML...")
+            
+            # Use html.parser instead of xml (more reliable, built-in)
+            soup = BeautifulSoup(response.content, 'html.parser')
+            items = soup.find_all('item')
+            
+            log(f"Found {len(items)} items in feed")
+            
+            for item in items[:max_results * 2]:  # Process more items to find relevant ones
+                if len(headlines) >= max_results:
+                    break
                 
-            try:
-                # Fetch RSS feed
-                response = requests.get(feed_url, timeout=10)
-                if response.status_code != 200:
+                title = item.find('title')
+                link = item.find('link')
+                pub_date = item.find('pubdate') or item.find('pubDate')
+                description = item.find('description')
+                
+                if not title:
                     continue
                 
-                # Parse RSS XML
-                soup = BeautifulSoup(response.content, 'xml')
-                items = soup.find_all('item')[:max_results]
+                title_text = title.get_text().strip()
+                link_text = link.get_text().strip() if link else ""
+                pub_date_text = pub_date.get_text().strip() if pub_date else ""
+                desc_text = description.get_text().strip() if description else ""
                 
-                for item in items:
-                    if len(headlines) >= max_results:
-                        break
-                    
-                    title = item.find('title')
-                    link = item.find('link')
-                    pub_date = item.find('pubDate')
-                    description = item.find('description')
-                    
-                    if not title:
-                        continue
-                    
-                    title_text = title.get_text().strip()
-                    link_text = link.get_text().strip() if link else ""
-                    pub_date_text = pub_date.get_text().strip() if pub_date else ""
-                    desc_text = description.get_text().strip() if description else ""
-                    
-                    # Check if headline is relevant to sector or contains risk keywords
-                    title_lower = title_text.lower()
-                    desc_lower = desc_text.lower()
-                    combined_text = f"{title_lower} {desc_lower}"
-                    
-                    # Match against sector keywords or risk keywords
-                    is_relevant = (
-                        any(keyword.lower() in combined_text for keyword in keywords) or
-                        any(risk_kw in combined_text for risk_kw in risk_keywords)
-                    )
-                    
-                    if is_relevant:
-                        headlines.append({
-                            "title": title_text,
-                            "url": link_text,
-                            "date": pub_date_text,
-                            "description": desc_text,
-                            "source": feed_url.split('/')[2] if '/' in feed_url else "unknown"
-                        })
-                        
-            except Exception as e:
-                log(f"Error fetching from {feed_url}: {e}")
-                continue
+                # Clean HTML tags from description
+                desc_text = re.sub(r'<[^>]+>', '', desc_text)
                 
-    except Exception as e:
-        log(f"Error fetching headlines: {e}")
+                # Check if headline is relevant (more lenient matching)
+                title_lower = title_text.lower()
+                desc_lower = desc_text.lower()
+                combined_text = f"{title_lower} {desc_lower}"
+                
+                # Match against sector keywords OR risk keywords (more inclusive)
+                sector_match = any(keyword.lower() in combined_text for keyword in keywords)
+                risk_match = any(risk_kw in combined_text for risk_kw in risk_keywords)
+                
+                # Accept if either sector-relevant OR contains risk/business keywords
+                is_relevant = sector_match or risk_match
+                
+                if is_relevant:
+                    source = feed_url.split('/')[2] if '/' in feed_url else "unknown"
+                    headlines.append({
+                        "title": title_text,
+                        "url": link_text,
+                        "date": pub_date_text,
+                        "description": desc_text[:200],  # Truncate long descriptions
+                        "source": source
+                    })
+                    log(f"Added headline: {title_text[:60]}...")
+                    
+        except requests.exceptions.Timeout:
+            log(f"Timeout fetching from {feed_url}")
+            continue
+        except requests.exceptions.RequestException as e:
+            log(f"Request error fetching from {feed_url}: {e}")
+            continue
+        except Exception as e:
+            log(f"Error parsing {feed_url}: {e}")
+            continue
+    
+    log(f"Total headlines collected: {len(headlines)}")
     
     # Remove duplicates based on title
     seen_titles = set()
@@ -470,6 +491,7 @@ def fetch_headlines_from_rss(sector: str, days: int, max_results: int = 20) -> L
             seen_titles.add(title_lower)
             unique_headlines.append(headline)
     
+    log(f"Unique headlines after deduplication: {len(unique_headlines)}")
     return unique_headlines[:max_results]
 
 def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> Dict:
@@ -484,11 +506,12 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
             "summary": "No headlines provided"
         }
     
+    log(f"Extracting risk themes from {len(headlines)} headlines...")
+    
     # Normalize headlines to objects with metadata
     normalized_headlines = []
     for headline in headlines:
         if isinstance(headline, str):
-            # Convert string to object format
             normalized_headlines.append({
                 "title": headline,
                 "url": "",
@@ -497,7 +520,6 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
                 "description": ""
             })
         elif isinstance(headline, dict):
-            # Already in object format, ensure required fields
             normalized_headlines.append({
                 "title": headline.get("title", ""),
                 "url": headline.get("url", ""),
@@ -518,52 +540,95 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
         }
         normalized_sector = sector_map.get(sector_lower, sector_lower)
         sector_risks = SECTOR_RISKS.get(normalized_sector, {})
+        log(f"Using sector knowledge base: {normalized_sector}, categories: {list(sector_risks.keys())}")
     
-    # Risk category keywords mapping for general risk detection
+    # Enhanced risk category keywords with more variations
     risk_category_keywords = {
-        "supply_chain": ["supply chain", "logistics", "shipping", "trade route", "import", "export", 
-                        "manufacturing", "component", "shortage", "disruption", "bottleneck"],
+        "supply_chain": ["supply", "chain", "logistics", "shipping", "trade", "import", "export", 
+                        "manufacturing", "component", "shortage", "disruption", "bottleneck", "semiconductor"],
         "regulatory": ["regulation", "regulatory", "FDA", "compliance", "policy", "law", 
-                      "antitrust", "sanction", "ban", "restriction", "approval"],
-        "economic": ["recession", "inflation", "interest rate", "GDP", "unemployment", 
-                     "spending", "demand", "economic", "currency", "dollar"],
+                      "antitrust", "sanction", "ban", "restriction", "approval", "government"],
+        "economic": ["recession", "inflation", "interest", "rate", "GDP", "unemployment", 
+                     "spending", "demand", "economic", "currency", "dollar", "earnings", "revenue",
+                     "profit", "loss", "growth", "downturn", "slowdown"],
         "geopolitical": ["trade war", "sanction", "geopolitical", "conflict", "tension", 
-                        "China", "Russia", "tariff", "embargo", "diplomatic"],
-        "technology": ["cybersecurity", "hack", "breach", "data", "AI", "disruption", 
-                      "innovation", "obsolescence", "digital"],
+                        "China", "Russia", "tariff", "embargo", "diplomatic", "war"],
+        "technology": ["cybersecurity", "hack", "breach", "data", "AI", "artificial intelligence",
+                      "innovation", "obsolescence", "digital", "cloud", "software"],
         "environmental": ["climate", "weather", "disaster", "environmental", "emission", 
-                          "carbon", "sustainability", "green"],
+                          "carbon", "sustainability", "green", "renewable"],
         "competitive": ["competition", "market share", "rival", "competitor", "pricing", 
-                      "disruption", "innovation"],
-        "systemic": ["crisis", "liquidity", "default", "contagion", "systemic", "bank run"]
+                      "disruption", "innovation", "startup"],
+        "systemic": ["crisis", "liquidity", "default", "contagion", "systemic", "bank run", "crash"]
     }
     
-    # Dictionary to store risks with their source articles (RAG-style)
-    # Structure: {risk_description: [article1, article2, ...]}
     identified_risks = {}
     risk_category_counts = {cat: 0 for cat in risk_category_keywords.keys()}
     
     # Analyze each headline/article
-    for article in normalized_headlines:
+    for idx, article in enumerate(normalized_headlines):
         title = article.get("title", "")
         description = article.get("description", "")
         combined_text = f"{title} {description}".lower()
         
-        # Match against structural risks from knowledge base (primary matching)
+        log(f"Analyzing article {idx+1}: {title[:60]}...")
+        article_matched = False
+        
+        # First pass: Match against general risk categories (easier to match)
+        for category, keywords in risk_category_keywords.items():
+            # Check if ANY keyword appears in the text
+            matched_keywords = [kw for kw in keywords if kw in combined_text]
+            
+            if matched_keywords:
+                log(f"  - Found {category} keywords: {matched_keywords[:3]}")
+                article_matched = True
+                
+                general_risk = f"{category.replace('_', ' ').title()} concerns"
+                
+                # Initialize risk if not exists
+                if general_risk not in identified_risks:
+                    identified_risks[general_risk] = {
+                        "risk_description": general_risk,
+                        "risk_category": category.replace("_", " ").title(),
+                        "articles": [],
+                        "article_count": 0
+                    }
+                
+                # Add article to this risk
+                article_ref = {
+                    "title": title,
+                    "url": article.get("url", ""),
+                    "date": article.get("date", ""),
+                    "source": article.get("source", ""),
+                    "relevance": "high" if len(matched_keywords) >= 3 else "medium",
+                    "matched_keywords": matched_keywords[:5]
+                }
+                
+                identified_risks[general_risk]["articles"].append(article_ref)
+                identified_risks[general_risk]["article_count"] += 1
+                risk_category_counts[category] += 1
+        
+        # Second pass: Try to match specific structural risks (more specific)
         if sector_risks:
             for category, risk_list in sector_risks.items():
                 for structural_risk in risk_list:
-                    # Extract meaningful keywords from structural risk (words > 3 chars)
-                    risk_keywords = [kw for kw in re.findall(r'\b\w+\b', structural_risk.lower()) 
-                                   if len(kw) > 3]
+                    # Extract key terms from structural risk description
+                    # Focus on nouns/key concepts (skip common words)
+                    skip_words = {'and', 'or', 'the', 'for', 'from', 'with', 'during', 'in', 'on', 'at', 'to', 'of'}
+                    risk_keywords = [
+                        kw for kw in re.findall(r'\b\w+\b', structural_risk.lower()) 
+                        if len(kw) > 3 and kw not in skip_words
+                    ]
                     
-                    # Count keyword matches
+                    # Count matches
                     matches = sum(1 for kw in risk_keywords if kw in combined_text)
                     match_ratio = matches / len(risk_keywords) if risk_keywords else 0
                     
-                    # Strong match: at least 30% of keywords or 2+ keywords match
-                    if match_ratio >= 0.3 or matches >= 2:
-                        # Add article reference to this risk
+                    # Very lenient: just need 1 good keyword match for longer risks, or 15% match
+                    if matches >= 1 and (match_ratio >= 0.15 or matches >= 2):
+                        log(f"  - Matched structural risk: {structural_risk[:50]}... ({matches}/{len(risk_keywords)} keywords)")
+                        article_matched = True
+                        
                         if structural_risk not in identified_risks:
                             identified_risks[structural_risk] = {
                                 "risk_description": structural_risk,
@@ -572,54 +637,30 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
                                 "article_count": 0
                             }
                         
-                        # Add article citation
                         article_ref = {
                             "title": title,
                             "url": article.get("url", ""),
                             "date": article.get("date", ""),
                             "source": article.get("source", ""),
-                            "relevance": "high" if match_ratio >= 0.5 or matches >= 3 else "medium"
+                            "relevance": "high" if match_ratio >= 0.3 or matches >= 3 else "medium"
                         }
                         identified_risks[structural_risk]["articles"].append(article_ref)
                         identified_risks[structural_risk]["article_count"] += 1
                         risk_category_counts[category] = risk_category_counts.get(category, 0) + 1
         
-        # Also detect general risk categories (secondary matching for uncategorized risks)
-        for category, keywords in risk_category_keywords.items():
-            if any(keyword in combined_text for keyword in keywords):
-                # Create a general risk description if not already matched to structural risk
-                general_risk = f"{category.replace('_', ' ').title()} concerns"
-                if general_risk not in identified_risks and category not in [r.get("risk_category", "").lower().replace(" ", "_") 
-                                                                           for r in identified_risks.values()]:
-                    # Only add if we have sector risks but this wasn't matched
-                    if not sector_risks or category not in sector_risks:
-                        if general_risk not in identified_risks:
-                            identified_risks[general_risk] = {
-                                "risk_description": general_risk,
-                                "risk_category": category.replace("_", " ").title(),
-                                "articles": [],
-                                "article_count": 0
-                            }
-                        identified_risks[general_risk]["articles"].append({
-                            "title": title,
-                            "url": article.get("url", ""),
-                            "date": article.get("date", ""),
-                            "source": article.get("source", ""),
-                            "relevance": "medium"
-                        })
-                        identified_risks[general_risk]["article_count"] += 1
+        if not article_matched:
+            log(f"  - No risk matches found (article may not be risk-related)")
     
-    # Convert to list format and sort by article count (most discussed risks first)
+    # Convert to list and sort
     risks_list = []
     for risk_desc, risk_data in identified_risks.items():
         risks_list.append({
             "risk": risk_data["risk_description"],
             "category": risk_data["risk_category"],
             "article_count": risk_data["article_count"],
-            "articles": risk_data["articles"][:5]  # Top 5 articles per risk
+            "articles": risk_data["articles"][:5]
         })
     
-    # Sort by article count (descending)
     risks_list.sort(key=lambda x: x["article_count"], reverse=True)
     
     # Summarize by category
@@ -633,6 +674,8 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
             }
         category_summary[category]["risk_count"] += 1
         category_summary[category]["article_count"] += risk_item["article_count"]
+    
+    log(f"Identified {len(risks_list)} risks across {len(category_summary)} categories")
     
     return {
         "identified_risks": risks_list,
@@ -649,11 +692,9 @@ def identify_stock_risks(ticker: str) -> Dict:
         stock = yf.Ticker(ticker)
         info = stock.info
         
-        # Try to get sector from stock info
         sector = info.get('sector', '').lower() if info else ''
         industry = info.get('industry', '').lower() if info else ''
         
-        # Map common industry keywords to sectors
         if not sector:
             if any(kw in industry for kw in ['tech', 'software', 'semiconductor']):
                 sector = 'technology'
@@ -666,7 +707,7 @@ def identify_stock_risks(ticker: str) -> Dict:
             elif any(kw in industry for kw in ['retail', 'consumer']):
                 sector = 'consumer'
             else:
-                sector = 'technology'  # Default
+                sector = 'technology'
         
         result = identify_sector_risks(sector)
         result["ticker"] = ticker
@@ -680,15 +721,9 @@ def identify_stock_risks(ticker: str) -> Dict:
         }
 
 def identify_sector_risks(sector: str) -> Dict:
-    """
-    Identify structural/inherent risks for a sector based on knowledge base.
-    
-    This tool provides baseline risk profiles based on sector characteristics.
-    For current/recent risk events from news, use fetch_headlines + extract_risk_themes tools.
-    """
+    """Identify structural/inherent risks for a sector based on knowledge base."""
     sector_lower = sector.lower()
     
-    # Normalize sector name
     sector_map = {
         "consumer": "consumer-discretionary",
         "consumer discretionary": "consumer-discretionary",
@@ -697,12 +732,9 @@ def identify_sector_risks(sector: str) -> Dict:
     }
     
     normalized_sector = sector_map.get(sector_lower, sector_lower)
-    
-    # Get risks from knowledge base
     risks = SECTOR_RISKS.get(normalized_sector, {})
     
     if not risks:
-        # Try to find partial match
         for key in SECTOR_RISKS.keys():
             if sector_lower in key or key in sector_lower:
                 risks = SECTOR_RISKS[key]
@@ -716,7 +748,6 @@ def identify_sector_risks(sector: str) -> Dict:
             "available_sectors": list(SECTOR_RISKS.keys())
         }
     
-    # Structure the response
     risk_categories = []
     for category, risk_list in risks.items():
         risk_categories.append({
@@ -755,32 +786,23 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="extract_risk_themes",
-            description="RAG system: Fetches real news articles for a sector, extracts specific risk themes from those articles, and provides citations to the source articles. Identifies which structural risks are being discussed in current news and references the articles that mention them.",
+            description="RAG system: Fetches real news articles for a sector, extracts specific risk themes from those articles, and provides citations to the source articles.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "sector": {
-                        "type": "string",
-                        "description": "Sector name (e.g., 'technology', 'healthcare', 'consumer-discretionary')"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "description": "Timeframe for news articles (e.g., '1w', '1m', '1y')"
-                    }
+                    "sector": {"type": "string"},
+                    "timeframe": {"type": "string"}
                 },
                 "required": ["sector", "timeframe"]
             }
         ),
         Tool(
             name="identify_sector_risks",
-            description="Identify structural/inherent risks that a sector or stock can face based on sector characteristics. Provides baseline risk profiles including supply chain disruptions, regulatory changes, economic factors, and geopolitical issues. For current/recent risk events from news, use fetch_headlines + extract_risk_themes tools.",
+            description="Identify structural/inherent risks for a sector or stock.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "sector_or_ticker": {
-                        "type": "string",
-                        "description": "Sector name (e.g., 'technology', 'healthcare') or stock ticker symbol (e.g., 'AAPL', 'MSFT')"
-                    }
+                    "sector_or_ticker": {"type": "string"}
                 },
                 "required": ["sector_or_ticker"]
             }
@@ -790,30 +812,28 @@ async def list_tools() -> list[Tool]:
 # --- call_tool Handler ---
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
-    log(f"call_tool: {name}")
+    log(f"call_tool: {name} with args: {arguments}")
+    
     if name == "fetch_headlines":
         sector = arguments.get("sector", "")
         timeframe = arguments.get("timeframe", "")
         
         try:
-            # Parse timeframe to determine how many days of news to fetch
             days = parse_timeframe_to_days(timeframe)
-            
-            # Fetch headlines from RSS feeds
             headlines = fetch_headlines_from_rss(sector, days, max_results=20)
             
             if not headlines:
+                log("WARNING: No headlines found!")
                 return [TextContent(
                     type="text",
                     text=json.dumps({
                         "sector": sector,
                         "timeframe": timeframe,
                         "headlines": [],
-                        "message": "No relevant headlines found for this sector and timeframe"
+                        "message": "No relevant headlines found. This could be due to RSS feed issues or connectivity problems."
                     })
                 )]
             
-            # Return structured headlines
             result = {
                 "sector": sector,
                 "timeframe": timeframe,
@@ -825,7 +845,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
             
         except Exception as e:
-            log(f"Error fetching headlines: {e}")
+            log(f"ERROR in fetch_headlines: {e}")
+            import traceback
+            log(traceback.format_exc())
             return [TextContent(
                 type="text",
                 text=json.dumps({
@@ -840,13 +862,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         timeframe = arguments.get("timeframe", "")
         
         try:
-            # Step 1: Fetch real articles from RSS feeds
             days = parse_timeframe_to_days(timeframe)
             log(f"Fetching articles for {sector} over {timeframe} ({days} days)")
             
             articles = fetch_headlines_from_rss(sector, days, max_results=30)
             
             if not articles:
+                log("WARNING: No articles found for risk extraction!")
                 return [TextContent(
                     type="text",
                     text=json.dumps({
@@ -854,16 +876,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         "timeframe": timeframe,
                         "identified_risks": [],
                         "articles_fetched": 0,
-                        "message": "No relevant articles found for this sector and timeframe. Unable to extract risk themes."
+                        "message": "No relevant articles found. Unable to extract risk themes. This could be due to RSS feed issues."
                     })
                 )]
             
             log(f"Fetched {len(articles)} articles, extracting risk themes...")
-            
-            # Step 2: Extract risk themes from real articles (RAG-style)
             result = extract_risk_themes_from_headlines(articles, sector)
             
-            # Step 3: Add metadata about the fetch operation
             result["sector"] = sector
             result["timeframe"] = timeframe
             result["articles_fetched"] = len(articles)
@@ -872,7 +891,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
             
         except Exception as e:
-            log(f"Error extracting risk themes: {e}")
+            log(f"ERROR in extract_risk_themes: {e}")
+            import traceback
+            log(traceback.format_exc())
             return [TextContent(
                 type="text",
                 text=json.dumps({
@@ -881,11 +902,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "timeframe": timeframe
                 })
             )]
+    
     elif name == "identify_sector_risks":
         sector_or_ticker = arguments.get("sector_or_ticker", "")
         
         try:
-            # Check if it's a ticker (typically 1-5 uppercase letters) or sector name
             is_ticker = len(sector_or_ticker) <= 5 and sector_or_ticker.isupper() and sector_or_ticker.isalpha()
             
             if is_ticker:
@@ -896,7 +917,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
             
         except Exception as e:
-            log(f"Error identifying sector risks: {e}")
+            log(f"ERROR in identify_sector_risks: {e}")
+            import traceback
+            log(traceback.format_exc())
             return [TextContent(
                 type="text",
                 text=json.dumps({
