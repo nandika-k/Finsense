@@ -276,6 +276,15 @@ async def main():
             print(f"  Timeframe: {headlines_data.get('timeframe', 'N/A')}")
             print(f"  Headlines Found: {headlines_data.get('headline_count', 0)}")
             
+            # Display sentiment distribution
+            sentiment_dist = headlines_data.get('sentiment_distribution', {})
+            if sentiment_dist:
+                print(f"\n  Sentiment Distribution:")
+                print(f"    Positive: {sentiment_dist.get('positive', 0)}")
+                print(f"    Negative: {sentiment_dist.get('negative', 0)}")
+                print(f"    Mixed: {sentiment_dist.get('mixed', 0)}")
+                print(f"    Neutral: {sentiment_dist.get('neutral', 0)}")
+            
             if 'message' in headlines_data:
                 print(f"\n  ⚠ Message: {headlines_data['message']}")
             
@@ -283,9 +292,14 @@ async def main():
             if headlines:
                 print(f"\n  Sample Headlines (first 5 of {len(headlines)}):")
                 for i, headline in enumerate(headlines[:5], 1):
-                    print(f"\n    [{i}] {headline.get('title', 'N/A')}")
+                    sentiment = headline.get('sentiment', 'neutral')
+                    confidence = headline.get('sentiment_confidence', 'unknown')
+                    sentiment_icon = {"positive": "📈", "negative": "📉", "mixed": "⚖️", "neutral": "➖"}.get(sentiment, "")
+                    
+                    print(f"\n    [{i}] {sentiment_icon} {headline.get('title', 'N/A')}")
                     print(f"        Source: {headline.get('source', 'N/A')}")
                     print(f"        Date: {headline.get('date', 'N/A')[:50]}")
+                    print(f"        Sentiment: {sentiment.upper()} (confidence: {confidence})")
                     if headline.get('description'):
                         desc = headline.get('description', '')[:100]
                         print(f"        Preview: {desc}...")
@@ -331,22 +345,35 @@ async def main():
                 for category, info in sorted(risk_categories.items(), 
                                             key=lambda x: x[1].get('article_count', 0), 
                                             reverse=True):
+                    sentiment_breakdown = info.get('sentiment_breakdown', {})
                     print(f"    • {category}: {info.get('risk_count', 0)} risks in {info.get('article_count', 0)} articles")
+                    if sentiment_breakdown:
+                        print(f"      Sentiment: +{sentiment_breakdown.get('positive', 0)} / -{sentiment_breakdown.get('negative', 0)} / ±{sentiment_breakdown.get('mixed', 0)} / ={sentiment_breakdown.get('neutral', 0)}")
             
             identified_risks = themes_data.get('identified_risks', [])
             if identified_risks:
                 print(f"\n  Top {min(3, len(identified_risks))} Risks with Article Citations:")
                 for i, risk_item in enumerate(identified_risks[:3], 1):
-                    print(f"\n    [{i}] {risk_item.get('risk', 'N/A')}")
+                    dominant_sentiment = risk_item.get('dominant_sentiment', 'neutral')
+                    sentiment_icon = {"positive": "📈", "negative": "📉", "mixed": "⚖️", "neutral": "➖"}.get(dominant_sentiment, "")
+                    
+                    print(f"\n    [{i}] {sentiment_icon} {risk_item.get('risk', 'N/A')}")
                     print(f"        Category: {risk_item.get('category', 'N/A')}")
                     print(f"        Mentioned in {risk_item.get('article_count', 0)} article(s)")
+                    print(f"        Dominant Sentiment: {dominant_sentiment.upper()}")
+                    
+                    sentiment_breakdown = risk_item.get('sentiment_breakdown', {})
+                    if sentiment_breakdown:
+                        print(f"        Breakdown: +{sentiment_breakdown.get('positive', 0)} / -{sentiment_breakdown.get('negative', 0)} / ±{sentiment_breakdown.get('mixed', 0)} / ={sentiment_breakdown.get('neutral', 0)}")
                     
                     articles = risk_item.get('articles', [])
                     if articles:
                         print(f"        Top citing article:")
                         article = articles[0]
+                        article_sentiment = article.get('sentiment', 'neutral')
                         print(f"          Title: {article.get('title', 'N/A')[:70]}...")
                         print(f"          Source: {article.get('source', 'N/A')}")
+                        print(f"          Sentiment: {article_sentiment.upper()}")
                         print(f"          Relevance: {article.get('relevance', 'N/A')}")
                         if 'matched_keywords' in article:
                             kw = article.get('matched_keywords', [])[:3]

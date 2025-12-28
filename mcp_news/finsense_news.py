@@ -11,6 +11,10 @@ from typing import Dict, List
 import re
 from urllib.parse import quote
 from bs4 import BeautifulSoup
+from bs4 import XMLParsedAsHTMLWarning
+import warnings
+
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 # Ensure stdout is unbuffered
 sys.stdout.reconfigure(line_buffering=True)
@@ -438,8 +442,8 @@ def get_sector_rss_feeds(sector: str) -> List[str]:
     
     return base_feeds + sector_feeds.get(sector.lower(), [])
 
-def analyze_sentiment(title: str, description: str, sector: str) -> str:
-    """Analyze sentiment of headline for the sector (positive/negative/neutral)"""
+def analyze_sentiment(title: str, description: str, sector: str) -> Dict[str, any]:
+    """Analyze sentiment of headline for the sector (positive/negative/mixed/neutral)"""
     text = f"{title} {description}".lower()
     
     # Positive indicators
@@ -447,7 +451,8 @@ def analyze_sentiment(title: str, description: str, sector: str) -> str:
         "surge", "jump", "rally", "gain", "rise", "climb", "soar", "boom", "growth",
         "profit", "beat", "exceed", "outperform", "record", "high", "breakthrough",
         "strong", "robust", "recovery", "innovation", "launch", "success", "win",
-        "approval", "deal", "acquisition", "expansion", "upgrade", "bullish"
+        "approval", "deal", "acquisition", "expansion", "upgrade", "bullish",
+        "optimistic", "confident", "positive", "momentum", "accelerate"
     ]
     
     # Negative indicators
@@ -456,18 +461,42 @@ def analyze_sentiment(title: str, description: str, sector: str) -> str:
         "underperform", "weak", "concern", "worry", "fear", "risk", "threat",
         "crisis", "shortage", "disruption", "delay", "cut", "layoff", "downturn",
         "recession", "investigation", "lawsuit", "fine", "penalty", "bearish",
-        "warning", "downgrade", "slump", "pressure"
+        "warning", "downgrade", "slump", "pressure", "struggle", "headwind",
+        "volatility", "uncertainty", "challenge", "difficult"
     ]
     
     pos_count = sum(1 for word in positive_words if word in text)
     neg_count = sum(1 for word in negative_words if word in text)
     
-    if pos_count > neg_count and pos_count >= 1:
-        return "positive"
-    elif neg_count > pos_count and neg_count >= 1:
-        return "negative"
+    # Determine sentiment category
+    if pos_count >= 2 and neg_count >= 2:
+        sentiment = "mixed"
+        confidence = "medium"
+    elif pos_count > neg_count and pos_count >= 2:
+        sentiment = "positive"
+        confidence = "high" if pos_count >= 3 else "medium"
+    elif pos_count > neg_count and pos_count == 1:
+        sentiment = "positive"
+        confidence = "low"
+    elif neg_count > pos_count and neg_count >= 2:
+        sentiment = "negative"
+        confidence = "high" if neg_count >= 3 else "medium"
+    elif neg_count > pos_count and neg_count == 1:
+        sentiment = "negative"
+        confidence = "low"
+    elif pos_count == neg_count and pos_count >= 1:
+        sentiment = "mixed"
+        confidence = "medium"
     else:
-        return "neutral"
+        sentiment = "neutral"
+        confidence = "high"
+    
+    return {
+        "sentiment": sentiment,
+        "confidence": confidence,
+        "positive_signals": pos_count,
+        "negative_signals": neg_count
+    }
 
 def parse_timeframe_to_days(timeframe: str) -> int:
     """Parse timeframe string to number of days"""
@@ -537,7 +566,11 @@ def fetch_headlines_from_rss(sector: str, days: int, max_results: int = 20) -> L
                 log(f"Failed to fetch {feed_url}: HTTP {response.status_code}")
                 continue
             
-            soup = BeautifulSoup(response.content, 'html.parser')
+            try:
+                soup = BeautifulSoup(response.content, 'xml')
+            except:
+                soup = BeautifulSoup(response.content, 'html.parser')
+            
             items = soup.find_all('item')
             
             log(f"Found {len(items)} items in feed")
@@ -566,10 +599,10 @@ def fetch_headlines_from_rss(sector: str, days: int, max_results: int = 20) -> L
                 is_relevant, relevance_score = is_relevant_to_sector(title_text, desc_text, keywords)
                 
                 if is_relevant and relevance_score >= 10:
-                    # Analyze sentiment
-                    sentiment = analyze_sentiment(title_text, desc_text, sector)
+                    # Analyze sentiment with detailed breakdown
+                    sentiment_analysis = analyze_sentiment(title_text, desc_text, sector)
                     
-                    source = feed_url.split('/')[2] if '/' in feed_url else "unknown"
+                    source = link_text if link_text else (feed_url.split('/')[2] if '/' in feed_url else "unknown")
                     headlines.append({
                         "title": title_text,
                         "url": link_text,
@@ -577,9 +610,14 @@ def fetch_headlines_from_rss(sector: str, days: int, max_results: int = 20) -> L
                         "description": desc_text[:200],
                         "source": source,
                         "relevance_score": relevance_score,
-                        "sentiment": sentiment
+                        "sentiment": sentiment_analysis["sentiment"],
+                        "sentiment_confidence": sentiment_analysis["confidence"],
+                        "sentiment_details": {
+                            "positive_signals": sentiment_analysis["positive_signals"],
+                            "negative_signals": sentiment_analysis["negative_signals"]
+                        }
                     })
-                    log(f"Added ({sentiment}): {title_text[:60]}... (score: {relevance_score})")
+                    log(f"Added ({sentiment_analysis['sentiment']}/{sentiment_analysis['confidence']}): {title_text[:60]}... (score: {relevance_score})")
                     
         except Exception as e:
             log(f"Error parsing {feed_url}: {e}")
@@ -599,6 +637,7 @@ def fetch_headlines_from_rss(sector: str, days: int, max_results: int = 20) -> L
     log(f"Unique headlines after deduplication: {len(unique_headlines)}")
     return unique_headlines[:max_results]
 
+
 def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> Dict:
     """
     RAG-like extraction: Identifies specific risks and references the articles that discuss them.
@@ -617,13 +656,16 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
     normalized_headlines = []
     for headline in headlines:
         if isinstance(headline, str):
+            # For string headlines, analyze sentiment
+            sentiment_analysis = analyze_sentiment(headline, "", sector or "")
             normalized_headlines.append({
                 "title": headline,
                 "url": "",
                 "date": "",
                 "source": "",
                 "description": "",
-                "sentiment": "neutral"
+                "sentiment": sentiment_analysis["sentiment"],
+                "sentiment_confidence": sentiment_analysis["confidence"]
             })
         elif isinstance(headline, dict):
             normalized_headlines.append({
@@ -632,7 +674,8 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
                 "date": headline.get("date", ""),
                 "source": headline.get("source", ""),
                 "description": headline.get("description", ""),
-                "sentiment": headline.get("sentiment", "neutral")
+                "sentiment": headline.get("sentiment", "neutral"),
+                "sentiment_confidence": headline.get("sentiment_confidence", "unknown")
             })
     
     # Get sector risk knowledge base if sector provided
@@ -677,6 +720,7 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
         title = article.get("title", "")
         description = article.get("description", "")
         sentiment = article.get("sentiment", "neutral")
+        sentiment_confidence = article.get("sentiment_confidence", "unknown")
         combined_text = f"{title} {description}".lower()
         
         log(f"Analyzing article {idx+1}: {title[:60]}...")
@@ -697,7 +741,8 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
                         "risk_description": general_risk,
                         "risk_category": category.replace("_", " ").title(),
                         "articles": [],
-                        "article_count": 0
+                        "article_count": 0,
+                        "sentiment_breakdown": {"positive": 0, "negative": 0, "mixed": 0, "neutral": 0}
                     }
                 
                 article_ref = {
@@ -706,12 +751,14 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
                     "date": article.get("date", ""),
                     "source": article.get("source", ""),
                     "sentiment": sentiment,
+                    "sentiment_confidence": sentiment_confidence,
                     "relevance": "high" if len(matched_keywords) >= 3 else "medium",
                     "matched_keywords": matched_keywords[:5]
                 }
                 
                 identified_risks[general_risk]["articles"].append(article_ref)
                 identified_risks[general_risk]["article_count"] += 1
+                identified_risks[general_risk]["sentiment_breakdown"][sentiment] += 1
                 risk_category_counts[category] += 1
         
         # Second pass: Match specific structural risks
@@ -736,7 +783,8 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
                                 "risk_description": structural_risk,
                                 "risk_category": category.replace("_", " ").title(),
                                 "articles": [],
-                                "article_count": 0
+                                "article_count": 0,
+                                "sentiment_breakdown": {"positive": 0, "negative": 0, "mixed": 0, "neutral": 0}
                             }
                         
                         article_ref = {
@@ -745,10 +793,12 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
                             "date": article.get("date", ""),
                             "source": article.get("source", ""),
                             "sentiment": sentiment,
+                            "sentiment_confidence": sentiment_confidence,
                             "relevance": "high" if match_ratio >= 0.3 or matches >= 3 else "medium"
                         }
                         identified_risks[structural_risk]["articles"].append(article_ref)
                         identified_risks[structural_risk]["article_count"] += 1
+                        identified_risks[structural_risk]["sentiment_breakdown"][sentiment] += 1
                         risk_category_counts[category] = risk_category_counts.get(category, 0) + 1
         
         if not article_matched:
@@ -761,6 +811,8 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
             "risk": risk_data["risk_description"],
             "category": risk_data["risk_category"],
             "article_count": risk_data["article_count"],
+            "sentiment_breakdown": risk_data["sentiment_breakdown"],
+            "dominant_sentiment": max(risk_data["sentiment_breakdown"].items(), key=lambda x: x[1])[0],
             "articles": risk_data["articles"][:5]
         })
     
@@ -773,10 +825,15 @@ def extract_risk_themes_from_headlines(headlines: List, sector: str = None) -> D
         if category not in category_summary:
             category_summary[category] = {
                 "risk_count": 0,
-                "article_count": 0
+                "article_count": 0,
+                "sentiment_breakdown": {"positive": 0, "negative": 0, "mixed": 0, "neutral": 0}
             }
         category_summary[category]["risk_count"] += 1
         category_summary[category]["article_count"] += risk_item["article_count"]
+        
+        # Aggregate sentiment
+        for sentiment, count in risk_item["sentiment_breakdown"].items():
+            category_summary[category]["sentiment_breakdown"][sentiment] += count
     
     log(f"Identified {len(risks_list)} risks across {len(category_summary)} categories")
     
@@ -938,7 +995,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 )]
             
             # Calculate sentiment distribution
-            sentiment_counts = {"positive": 0, "negative": 0, "neutral": 0}
+            sentiment_counts = {"positive": 0, "negative": 0, "mixed": 0,"neutral": 0}
             for h in headlines:
                 sentiment_counts[h.get("sentiment", "neutral")] += 1
             
