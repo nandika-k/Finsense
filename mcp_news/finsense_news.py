@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 def log(msg):
     logger.info(msg)
 
+RELEVANCE_SCORE = 7
+
 # --- MCP Server Initialization ---
 app = Server("finsense-news")
 
@@ -347,67 +349,67 @@ SECTOR_RISKS = {
 # --- Helper Functions for News Fetching ---
 
 def get_sector_keywords(sector: str) -> Dict[str, List[str]]:
-    """Get highly specific search keywords for each sector"""
+    """Get expanded search keywords for each sector - broader coverage"""
     sector_keywords_map = {
         "technology": {
-            "required": ["technology", "tech", "semiconductor", "chip", "AI", "software", "cloud", "data center"],
-            "companies": ["Apple", "Microsoft", "Google", "Alphabet", "NVIDIA", "Meta", "Amazon AWS", "Intel", "AMD", "TSMC", "Samsung", "Qualcomm", "Oracle", "Salesforce", "Adobe", "Tesla"],
-            "terms": ["GPU", "CPU", "artificial intelligence", "machine learning", "chip shortage", "fab", "foundry", "silicon", "processor", "cloud computing", "SaaS", "enterprise software", "cybersecurity", "5G", "quantum computing", "robotics"]
+            "required": ["technology", "tech", "semiconductor", "chip", "AI", "software", "cloud", "data center", "digital", "computing", "internet"],
+            "companies": ["Apple", "Microsoft", "Google", "Alphabet", "NVIDIA", "Meta", "Amazon AWS", "Intel", "AMD", "TSMC", "Samsung", "Qualcomm", "Oracle", "Salesforce", "Adobe", "Tesla", "IBM", "Cisco", "Dell"],
+            "terms": ["GPU", "CPU", "artificial intelligence", "machine learning", "chip shortage", "fab", "foundry", "silicon", "processor", "cloud computing", "SaaS", "enterprise software", "cybersecurity", "5G", "quantum computing", "robotics", "automation", "IoT", "blockchain", "cryptocurrency", "data analytics", "mobile"]
         },
         "healthcare": {
-            "required": ["healthcare", "pharmaceutical", "biotech", "drug", "FDA", "clinical"],
-            "companies": ["Pfizer", "Moderna", "Johnson & Johnson", "Eli Lilly", "Merck", "AbbVie", "Bristol Myers", "Amgen", "Gilead", "Regeneron"],
-            "terms": ["vaccine", "clinical trial", "drug approval", "biosimilar", "gene therapy", "CAR-T", "obesity drug", "GLP-1", "oncology", "rare disease", "medical device"]
+            "required": ["healthcare", "health", "pharmaceutical", "pharma", "biotech", "drug", "FDA", "clinical", "medical", "medicine", "hospital", "doctor", "patient", "therapy", "treatment"],
+            "companies": ["Pfizer", "Moderna", "Johnson & Johnson", "Eli Lilly", "Merck", "AbbVie", "Bristol Myers", "Amgen", "Gilead", "Regeneron", "Novartis", "Roche", "GSK", "Sanofi", "AstraZeneca", "Biogen"],
+            "terms": ["vaccine", "clinical trial", "drug approval", "biosimilar", "gene therapy", "CAR-T", "obesity drug", "GLP-1", "oncology", "rare disease", "medical device", "diagnosis", "prescription", "illness", "disease", "infection", "surgery", "clinic", "healthcare provider", "insurance", "Medicare", "Medicaid"]
         },
         "financial-services": {
-            "required": ["bank", "banking", "financial", "finance", "Fed", "interest rate"],
-            "companies": ["JPMorgan", "Bank of America", "Wells Fargo", "Citigroup", "Goldman Sachs", "Morgan Stanley", "BlackRock", "Visa", "Mastercard"],
-            "terms": ["Federal Reserve", "loan", "credit", "mortgage", "trading", "investment banking", "wealth management", "fintech", "payment", "capital markets", "deposit"]
+            "required": ["bank", "banking", "financial", "finance", "Fed", "interest rate", "credit", "loan", "investment", "trading", "capital", "money", "payment", "deposit"],
+            "companies": ["JPMorgan", "Bank of America", "Wells Fargo", "Citigroup", "Goldman Sachs", "Morgan Stanley", "BlackRock", "Visa", "Mastercard", "American Express", "Charles Schwab", "Fidelity", "PayPal"],
+            "terms": ["Federal Reserve", "loan", "credit", "mortgage", "trading", "investment banking", "wealth management", "fintech", "payment", "capital markets", "deposit", "interest", "bond", "stock", "equity", "debt", "lending", "borrowing", "liquidity", "central bank"]
         },
         "energy": {
-            "required": ["oil", "energy", "crude", "natural gas", "petroleum", "renewable"],
-            "companies": ["ExxonMobil", "Chevron", "ConocoPhillips", "Shell", "BP", "TotalEnergies", "NextEra Energy", "Occidental"],
-            "terms": ["barrel", "WTI", "Brent", "OPEC", "refinery", "pipeline", "LNG", "wind", "solar", "EV", "electric vehicle", "battery"]
+            "required": ["oil", "energy", "crude", "natural gas", "petroleum", "renewable", "power", "fuel", "electricity", "gas", "coal", "solar", "wind"],
+            "companies": ["ExxonMobil", "Chevron", "ConocoPhillips", "Shell", "BP", "TotalEnergies", "NextEra Energy", "Occidental", "Marathon", "Valero", "Phillips 66", "Enbridge"],
+            "terms": ["barrel", "WTI", "Brent", "OPEC", "refinery", "pipeline", "LNG", "wind", "solar", "EV", "electric vehicle", "battery", "drilling", "production", "reserves", "exploration", "fossil fuel", "clean energy", "green energy", "carbon"]
         },
         "consumer": {
-            "required": ["retail", "consumer", "sales", "shopping"],
-            "companies": ["Amazon", "Walmart", "Target", "Costco", "Home Depot", "Lowe's", "Nike", "Starbucks", "McDonald's"],
-            "terms": ["e-commerce", "same-store sales", "Black Friday", "holiday shopping", "inventory", "margin", "foot traffic", "omnichannel"]
+            "required": ["retail", "consumer", "sales", "shopping", "store", "merchandise", "product", "goods", "spending", "purchase"],
+            "companies": ["Amazon", "Walmart", "Target", "Costco", "Home Depot", "Lowe's", "Nike", "Starbucks", "McDonald's", "Best Buy", "Kroger", "CVS", "Walgreens"],
+            "terms": ["e-commerce", "same-store sales", "Black Friday", "holiday shopping", "inventory", "margin", "foot traffic", "omnichannel", "online shopping", "brick-and-mortar", "checkout", "merchandise", "discount", "promotion"]
         },
         "consumer-discretionary": {
-            "required": ["retail", "consumer discretionary", "automotive", "luxury"],
-            "companies": ["Tesla", "Ford", "GM", "Nike", "Lululemon", "LVMH", "Disney", "Netflix", "Booking"],
-            "terms": ["electric vehicle", "EV sales", "SUV", "pickup truck", "streaming", "theme park", "hotel", "travel", "restaurant"]
+            "required": ["retail", "consumer discretionary", "automotive", "luxury", "vehicle", "car", "entertainment", "leisure", "travel", "hotel", "restaurant"],
+            "companies": ["Tesla", "Ford", "GM", "Nike", "Lululemon", "LVMH", "Disney", "Netflix", "Booking", "Marriott", "Hilton", "Airbnb", "Uber", "Lyft"],
+            "terms": ["electric vehicle", "EV sales", "SUV", "pickup truck", "streaming", "theme park", "hotel", "travel", "restaurant", "auto sales", "vehicle production", "tourism", "hospitality", "apparel", "fashion"]
         },
         "industrials": {
-            "required": ["industrial", "manufacturing", "aerospace", "defense"],
-            "companies": ["Boeing", "Lockheed Martin", "Raytheon", "General Electric", "Caterpillar", "Deere", "3M", "Honeywell"],
-            "terms": ["aircraft", "defense contract", "construction equipment", "factory", "automation", "supply chain", "logistics", "freight"]
+            "required": ["industrial", "manufacturing", "aerospace", "defense", "machinery", "equipment", "construction", "transportation", "logistics", "shipping"],
+            "companies": ["Boeing", "Lockheed Martin", "Raytheon", "General Electric", "Caterpillar", "Deere", "3M", "Honeywell", "United Parcel", "FedEx", "Union Pacific"],
+            "terms": ["aircraft", "defense contract", "construction equipment", "factory", "automation", "supply chain", "logistics", "freight", "railroad", "trucking", "warehouse", "industrial production"]
         },
         "materials": {
-            "required": ["materials", "mining", "metals", "chemicals"],
-            "companies": ["Freeport-McMoRan", "Newmont", "Dow", "DuPont", "Nucor", "Steel Dynamics"],
-            "terms": ["copper", "gold", "steel", "aluminum", "lithium", "commodity", "ore", "industrial metals", "rare earth"]
+            "required": ["materials", "mining", "metals", "metal", "chemicals", "commodity", "steel", "aluminum", "copper", "iron", "mineral"],
+            "companies": ["Freeport-McMoRan", "Newmont", "Dow", "DuPont", "Nucor", "Steel Dynamics", "Barrick Gold", "Southern Copper"],
+            "terms": ["copper", "gold", "steel", "aluminum", "lithium", "commodity", "ore", "industrial metals", "rare earth", "precious metals", "base metals", "smelting", "refining"]
         },
         "real-estate": {
-            "required": ["real estate", "property", "REIT", "housing", "mortgage"],
-            "companies": ["Prologis", "American Tower", "Crown Castle", "Simon Property", "Realty Income"],
-            "terms": ["commercial real estate", "office", "warehouse", "apartment", "multifamily", "rent", "occupancy", "cap rate"]
+            "required": ["real estate", "property", "REIT", "housing", "mortgage", "home", "building", "construction", "residential", "commercial"],
+            "companies": ["Prologis", "American Tower", "Crown Castle", "Simon Property", "Realty Income", "Equity Residential", "Public Storage", "Welltower"],
+            "terms": ["commercial real estate", "office", "warehouse", "apartment", "multifamily", "rent", "occupancy", "cap rate", "lease", "tenant", "landlord", "home sales", "real estate market"]
         },
         "utilities": {
-            "required": ["utility", "electric", "power", "grid", "energy utility"],
-            "companies": ["NextEra Energy", "Duke Energy", "Southern Company", "Dominion Energy", "American Electric Power"],
-            "terms": ["electricity", "natural gas utility", "transmission", "distribution", "renewable energy", "nuclear", "power plant"]
+            "required": ["utility", "utilities", "electric", "power", "grid", "energy utility", "electricity", "water", "gas utility"],
+            "companies": ["NextEra Energy", "Duke Energy", "Southern Company", "Dominion Energy", "American Electric Power", "Exelon", "Sempra Energy"],
+            "terms": ["electricity", "natural gas utility", "transmission", "distribution", "renewable energy", "nuclear", "power plant", "generator", "power generation", "utility company", "electric utility"]
         },
         "communications": {
-            "required": ["telecom", "wireless", "broadband", "5G", "communications"],
-            "companies": ["Verizon", "AT&T", "T-Mobile", "Comcast", "Charter Communications"],
-            "terms": ["spectrum", "fiber", "cable", "satellite", "network", "subscriber", "ARPU", "tower"]
+            "required": ["telecom", "telecommunications", "wireless", "broadband", "5G", "communications", "network", "internet", "phone", "mobile"],
+            "companies": ["Verizon", "AT&T", "T-Mobile", "Comcast", "Charter Communications", "Lumen", "Frontier"],
+            "terms": ["spectrum", "fiber", "cable", "satellite", "network", "subscriber", "ARPU", "tower", "cell tower", "data plan", "connectivity", "bandwidth"]
         },
         "consumer-staples": {
-            "required": ["consumer staples", "food", "beverage", "packaged goods"],
-            "companies": ["Procter & Gamble", "Coca-Cola", "PepsiCo", "Walmart", "Costco", "Mondelez", "Kraft Heinz"],
-            "terms": ["CPG", "grocery", "private label", "pricing power", "volume", "brand", "distribution"]
+            "required": ["consumer staples", "food", "beverage", "packaged goods", "grocery", "household", "personal care", "drink"],
+            "companies": ["Procter & Gamble", "Coca-Cola", "PepsiCo", "Walmart", "Costco", "Mondelez", "Kraft Heinz", "Nestle", "Unilever", "Colgate"],
+            "terms": ["CPG", "grocery", "private label", "pricing power", "volume", "brand", "distribution", "packaged food", "soft drink", "snacks", "household products", "consumer products"]
         }
     }
     return sector_keywords_map.get(sector.lower(), {
@@ -417,30 +419,75 @@ def get_sector_keywords(sector: str) -> Dict[str, List[str]]:
     })
 
 def get_sector_rss_feeds(sector: str) -> List[str]:
-    """Get sector-specific RSS feeds"""
-    base_feeds = [
-        "https://feeds.finance.yahoo.com/rss/2.0/headline",
-        "https://www.cnbc.com/id/100003114/device/rss/rss.html",
-        "https://feeds.reuters.com/reuters/businessNews",
+    """Get sector-specific RSS feeds with multiple reliable fallbacks (all free)"""
+    
+    # Primary feeds (most reliable, free)
+    primary_feeds = [
+        "https://www.cnbc.com/id/100003114/device/rss/rss.html",  # CNBC Top News
+        "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",  # WSJ Markets (free)
     ]
     
+    # Fallback feeds (free alternatives)
+    fallback_feeds = [
+        "https://www.investing.com/rss/news.rss",  # Investing.com
+        "https://seekingalpha.com/market_currents.xml",  # Seeking Alpha
+        "https://www.marketwatch.com/rss/topstories",  # MarketWatch
+        "https://www.benzinga.com/feed",  # Benzinga
+    ]
+    
+    # Sector-specific feeds (free)
     sector_feeds = {
         "technology": [
             "https://www.cnbc.com/id/19854910/device/rss/rss.html",  # CNBC Tech
-            "https://feeds.reuters.com/reuters/technologyNews",
+            "https://techcrunch.com/feed/",  # TechCrunch
+            "https://www.theverge.com/rss/index.xml",  # The Verge
         ],
         "healthcare": [
-            "https://feeds.reuters.com/reuters/healthNews",
+            "https://www.fiercepharma.com/rss/xml",  # FiercePharma
+            "https://www.biopharmadive.com/feeds/news/",  # BioPharma Dive
         ],
         "financial-services": [
-            "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+            "https://www.cnbc.com/id/10000664/device/rss/rss.html",  # CNBC Finance
+            "https://www.americanbanker.com/feed",  # American Banker
         ],
         "energy": [
-            "https://feeds.reuters.com/reuters/energy",
+            "https://www.rigzone.com/news/rss.asp",  # Rigzone Energy
+            "https://www.worldoil.com/feeds/news",  # World Oil
+        ],
+        "consumer": [
+            "https://www.retaildive.com/feeds/news/",  # Retail Dive
+            "https://www.cnbc.com/id/100727362/device/rss/rss.html",  # CNBC Retail
+        ],
+        "consumer-discretionary": [
+            "https://www.cnbc.com/id/10000113/device/rss/rss.html",  # CNBC Auto
+            "https://www.retaildive.com/feeds/news/",  # Retail Dive
+        ],
+        "industrials": [
+            "https://www.industryweek.com/rss",  # Industry Week
+        ],
+        "materials": [
+            "https://www.mining.com/feed/",  # Mining.com
+        ],
+        "real-estate": [
+            "https://www.housingwire.com/feed/",  # HousingWire
+        ],
+        "utilities": [
+            "https://www.utilitydive.com/feeds/news/",  # Utility Dive
+        ],
+        "communications": [
+            "https://www.fiercewireless.com/rss/xml",  # FierceWireless
+        ],
+        "consumer-staples": [
+            "https://www.fooddive.com/feeds/news/",  # Food Dive
         ]
     }
     
-    return base_feeds + sector_feeds.get(sector.lower(), [])
+    # Combine feeds: primary + sector-specific + fallbacks
+    all_feeds = primary_feeds.copy()
+    all_feeds.extend(sector_feeds.get(sector.lower(), []))
+    all_feeds.extend(fallback_feeds)
+    
+    return all_feeds
 
 def analyze_sentiment(title: str, description: str, sector: str) -> Dict[str, any]:
     """Analyze sentiment of headline for the sector (positive/negative/mixed/neutral)"""
@@ -517,15 +564,15 @@ def parse_timeframe_to_days(timeframe: str) -> int:
         return 7  # Default to 1 week
 
 def is_relevant_to_sector(title: str, description: str, keywords: Dict[str, List[str]]) -> tuple[bool, int]:
-    """Check if headline is relevant to sector with scoring"""
+    """Check if headline is relevant to sector with scoring - RELAXED thresholds"""
     text = f"{title} {description}".lower()
     score = 0
     
-    # Required keywords (must have at least one)
+    # Required keywords (must have at least one) - lower initial score requirement
     required_match = any(kw.lower() in text for kw in keywords.get("required", []))
     if not required_match:
         return False, 0
-    score += 10
+    score += 5  # Reduced from 10 to make it easier to pass
     
     # Company mentions (high value)
     company_matches = sum(1 for company in keywords.get("companies", []) if company.lower() in text)
@@ -535,11 +582,16 @@ def is_relevant_to_sector(title: str, description: str, keywords: Dict[str, List
     term_matches = sum(1 for term in keywords.get("terms", []) if term.lower() in text)
     score += term_matches * 2
     
-    return score >= 10, score
+    # Description bonus (encourage articles with substance)
+    if len(description) > 100:
+        score += 2
+    
+    return score >= 5, score  # Lowered threshold from 10 to 5
 
 def fetch_headlines_from_rss(sector: str, days: int, max_results: int = 20) -> List[Dict]:
     """
     Fetch sector-specific headlines from RSS feeds with sentiment analysis.
+    ROBUST: Works even when some feeds fail - aggregates from all available sources.
     """
     headlines = []
     keywords = get_sector_keywords(sector)
@@ -549,23 +601,30 @@ def fetch_headlines_from_rss(sector: str, days: int, max_results: int = 20) -> L
     log(f"Companies: {keywords.get('companies', [])[:5]}")
     
     rss_feeds = get_sector_rss_feeds(sector)
+    log(f"Will attempt {len(rss_feeds)} RSS feeds")
     
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
     
+    successful_feeds = 0
+    failed_feeds = 0
+    
     for feed_url in rss_feeds:
         if len(headlines) >= max_results:
+            log(f"Reached max results ({max_results}), stopping feed fetching")
             break
         
         try:
             log(f"Fetching from: {feed_url}")
-            response = requests.get(feed_url, timeout=15, headers=headers)
+            response = requests.get(feed_url, timeout=10, headers=headers)
             
             if response.status_code != 200:
-                log(f"Failed to fetch {feed_url}: HTTP {response.status_code}")
+                log(f"⚠ Failed to fetch {feed_url}: HTTP {response.status_code}")
+                failed_feeds += 1
                 continue
             
+            # Try XML parser first, fall back to HTML parser
             try:
                 soup = BeautifulSoup(response.content, 'xml')
             except:
@@ -573,22 +632,45 @@ def fetch_headlines_from_rss(sector: str, days: int, max_results: int = 20) -> L
             
             items = soup.find_all('item')
             
-            log(f"Found {len(items)} items in feed")
+            if not items:
+                # Try alternative RSS structure (some feeds use 'entry' instead of 'item')
+                items = soup.find_all('entry')
             
-            for item in items[:max_results * 3]:
+            log(f"✓ Found {len(items)} items in feed")
+            
+            if len(items) == 0:
+                failed_feeds += 1
+                continue
+            
+            successful_feeds += 1
+            articles_from_feed = 0
+            
+            for item in items[:max_results * 3]:  # Process more items but only keep best matches
                 if len(headlines) >= max_results:
                     break
                 
+                # Handle both 'item' and 'entry' RSS formats
                 title = item.find('title')
                 link = item.find('link')
-                pub_date = item.find('pubdate') or item.find('pubDate')
-                description = item.find('description')
+                pub_date = item.find('pubdate') or item.find('pubDate') or item.find('published')
+                description = item.find('description') or item.find('summary') or item.find('content')
                 
                 if not title:
                     continue
                 
                 title_text = title.get_text().strip()
-                link_text = link.get_text().strip() if link else ""
+                
+                # Handle different link formats
+                if link:
+                    if link.get_text():
+                        link_text = link.get_text().strip()
+                    elif link.get('href'):
+                        link_text = link.get('href').strip()
+                    else:
+                        link_text = ""
+                else:
+                    link_text = ""
+                
                 pub_date_text = pub_date.get_text().strip() if pub_date else ""
                 desc_text = description.get_text().strip() if description else ""
                 
@@ -598,7 +680,7 @@ def fetch_headlines_from_rss(sector: str, days: int, max_results: int = 20) -> L
                 # Check relevance with scoring
                 is_relevant, relevance_score = is_relevant_to_sector(title_text, desc_text, keywords)
                 
-                if is_relevant and relevance_score >= 10:
+                if is_relevant and relevance_score >= RELEVANCE_SCORE:
                     # Analyze sentiment with detailed breakdown
                     sentiment_analysis = analyze_sentiment(title_text, desc_text, sector)
                     

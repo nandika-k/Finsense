@@ -266,7 +266,7 @@ async def main():
         print("Watch [SERVER] logs below for feed-by-feed progress.\n")
         
         try:
-            headlines_data = await coordinator.fetch_headlines("technology", "1w")
+            headlines_data = await coordinator.fetch_headlines("healthcare", "1w")
             
             print("\n" + "-"*80)
             print("RESULTS:")
@@ -325,7 +325,7 @@ async def main():
         print("Watch [SERVER] logs for article-by-article analysis.\n")
         
         try:
-            themes_data = await coordinator.extract_risk_themes("technology", "1w")
+            themes_data = await coordinator.extract_risk_themes("energy", "1w")
             
             print("\n" + "-"*80)
             print("RESULTS:")
@@ -400,7 +400,7 @@ async def main():
         print("\nThis uses the built-in sector risk database (no network calls).\n")
         
         try:
-            risks_data = await coordinator.identify_sector_risks("technology")
+            risks_data = await coordinator.identify_sector_risks("consumer")
             
             print("-"*80)
             print("RESULTS:")
