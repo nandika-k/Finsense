@@ -212,7 +212,7 @@ class FinsenseCoordinator:
         logger.info("Market tools: %s", [t["name"] for t in market_tools])
 
     #news tools
-    async def fetch_headlines(self, sector: str, timeframe: str) -> List[str]:
+    async def fetch_headlines(self, sector: str, timeframe: str) -> Dict[str, Any]:
         """Fetch news headlines for a sector"""
         result = await self.news_client.call_tool("fetch_headlines", {
             "sector": sector,
@@ -220,20 +220,28 @@ class FinsenseCoordinator:
         })
         
         content = result["content"][0]["text"]
-        import ast
-        headlines = ast.literal_eval(content)
-        return headlines
+        headlines_data = json.loads(content)
+        return headlines_data
     
-    async def extract_risk_themes(self, headlines: List[str]) -> List[str]:
-        """Extract risk themes from headlines"""
+    async def extract_risk_themes(self, sector: str, timeframe: str) -> Dict[str, Any]:
+        """Extract risk themes from real news articles (RAG-style: fetches articles and extracts risks with citations)"""
         result = await self.news_client.call_tool("extract_risk_themes", {
-            "headlines": headlines
+            "sector": sector,
+            "timeframe": timeframe
         })
         
         content = result["content"][0]["text"]
-        import ast
-        themes = ast.literal_eval(content)
-        return themes
+        themes_data = json.loads(content)
+        return themes_data
+    
+    async def identify_sector_risks(self, sector_or_ticker: str) -> Dict[str, Any]:
+        """Identify structural/inherent risks for a sector or stock"""
+        result = await self.news_client.call_tool("identify_sector_risks", {
+            "sector_or_ticker": sector_or_ticker
+        })
+        content = result["content"][0]["text"]
+        risks_data = json.loads(content)
+        return risks_data
 
     #market tools
     async def get_market_indices(self) -> Dict[str, Any]:
@@ -447,7 +455,7 @@ async def main():
             print(f"\n  Recommendation: {comparison.get('recommendation', 'N/A')}")
         except Exception as e:
             print(f"\nError comparing sectors: {e}")
-        '''
+        
         # Test sector correlations
         print("\n" + "="*60)
         print("Computing Sector Correlations...")
@@ -562,7 +570,111 @@ async def main():
         print("\n" + "="*60)
         print("✓ Market analysis complete")
         print("="*60 + "\n")
+        '''
         
+        # Test news tools
+        print("\n" + "="*60)
+        print("Testing News Tools...")
+        print("="*60)
+        
+        # Test fetch_headlines
+        print("\n" + "="*60)
+        print("Fetching Headlines...")
+        print("="*60)
+        try:
+            headlines_data = await coordinator.fetch_headlines("technology", "1w")
+            print(f"\nSector: {headlines_data.get('sector', 'N/A')}")
+            print(f"Timeframe: {headlines_data.get('timeframe', 'N/A')}")
+            print(f"Headlines Found: {headlines_data.get('headline_count', 0)}")
+            
+            headlines = headlines_data.get('headlines', [])
+            if headlines:
+                print(f"\nSample Headlines:")
+                for i, headline in enumerate(headlines[:5], 1):
+                    print(f"\n  {i}. {headline.get('title', 'N/A')}")
+                    print(f"     Source: {headline.get('source', 'N/A')}")
+                    if headline.get('date'):
+                        print(f"     Date: {headline.get('date', 'N/A')}")
+            else:
+                print("\n  No headlines found (this is normal if RSS feeds are unavailable)")
+        except Exception as e:
+            print(f"\nError fetching headlines: {e}")
+        
+        # Test extract_risk_themes (RAG-style: fetches real articles and extracts risks)
+        print("\n" + "="*60)
+        print("Extracting Risk Themes from Real Articles (RAG-style)...")
+        print("="*60)
+        try:
+            # Tool now fetches real articles internally and extracts risks
+            themes_data = await coordinator.extract_risk_themes("technology", "1w")
+            
+            print(f"\nRAG-Style Risk Extraction Results:")
+            print(f"  Sector: {themes_data.get('sector', 'N/A')}")
+            print(f"  Timeframe: {themes_data.get('timeframe', 'N/A')}")
+            print(f"  Articles Fetched: {themes_data.get('articles_fetched', 0)}")
+            print(f"  Total Risks Identified: {themes_data.get('total_risks_identified', 0)}")
+            print(f"  Total Articles Analyzed: {themes_data.get('total_articles_analyzed', 0)}")
+            print(f"  Summary: {themes_data.get('summary', 'N/A')}")
+            
+            risk_categories = themes_data.get('risk_categories', {})
+            if risk_categories:
+                print(f"\n  Risk Categories Summary:")
+                for category, info in risk_categories.items():
+                    print(f"    {category}: {info.get('risk_count', 0)} risks, {info.get('article_count', 0)} article mentions")
+            
+            identified_risks = themes_data.get('identified_risks', [])
+            if identified_risks:
+                print(f"\n  Specific Risks with Real Article Citations:")
+                for i, risk_item in enumerate(identified_risks[:5], 1):
+                    print(f"\n    {i}. Risk: {risk_item.get('risk', 'N/A')}")
+                    print(f"       Category: {risk_item.get('category', 'N/A')}")
+                    print(f"       Mentioned in {risk_item.get('article_count', 0)} article(s):")
+                    
+                    articles = risk_item.get('articles', [])
+                    for j, article in enumerate(articles[:3], 1):
+                        print(f"\n         Article {j}:")
+                        print(f"           Title: {article.get('title', 'N/A')}")
+                        if article.get('url'):
+                            print(f"           URL: {article.get('url', 'N/A')}")
+                        if article.get('date'):
+                            print(f"           Date: {article.get('date', 'N/A')}")
+                        if article.get('source'):
+                            print(f"           Source: {article.get('source', 'N/A')}")
+                        print(f"           Relevance: {article.get('relevance', 'N/A')}")
+            else:
+                print("\n  No risks identified (may indicate no relevant articles found or no risk matches)")
+        except Exception as e:
+            print(f"\nError extracting risk themes: {e}")
+        
+        # Test identify_sector_risks
+        print("\n" + "="*60)
+        print("Identifying Sector Risks...")
+        print("="*60)
+        try:
+            risks_data = await coordinator.identify_sector_risks("consumer-discretionary")
+            
+            print(f"\nSector: {risks_data.get('sector', 'N/A')}")
+            print(f"Risk Type: {risks_data.get('risk_type', 'N/A')}")
+            print(f"Description: {risks_data.get('description', 'N/A')}")
+            print(f"Total Risk Count: {risks_data.get('total_risk_count', 0)}")
+            print(f"Summary: {risks_data.get('summary', 'N/A')}")
+            
+            risk_categories = risks_data.get('risk_categories', [])
+            if risk_categories:
+                print(f"\n  Risk Categories:")
+                for category_info in risk_categories[:3]:
+                    category = category_info.get('category', 'N/A')
+                    count = category_info.get('count', 0)
+                    print(f"\n    {category} ({count} risks):")
+                    risks = category_info.get('risks', [])
+                    for risk in risks[:2]:
+                        print(f"      - {risk}")
+        except Exception as e:
+            print(f"\nError identifying sector risks: {e}")
+        
+        print("\n" + "="*60)
+        print("✓ News tools test complete")
+        print("="*60 + "\n")
     except Exception as e:
         logger.exception("Error: %s", e)
     finally:
