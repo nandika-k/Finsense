@@ -196,6 +196,102 @@ def get_llm_client() -> Optional[Any]:
         return None
 
 
+def parse_sectors_with_llm(client: Any, user_input: str) -> Optional[List[str]]:
+    """
+    Use LLM to parse natural language sector selection with broad understanding.
+    Handles synonyms, abbreviations, industry names, and various phrasings.
+    
+    Args:
+        client: Groq client
+        user_input: User's natural language input
+    
+    Returns:
+        List of matched sector names, or None if parsing fails
+    """
+    if not client:
+        return None
+        
+    try:
+        prompt = f"""Parse the user's input to identify which financial market sectors they want to analyze.
+
+VALID SECTORS (these are the ONLY allowed values):
+- technology (also: tech, software, IT, computers, semiconductors, AI, cloud computing)
+- healthcare (also: health, medical, pharma, pharmaceuticals, biotech, hospitals)
+- financial-services (also: finance, banks, banking, fintech, insurance, financial)
+- energy (also: oil, gas, petroleum, renewable energy, utilities energy, power)
+- consumer (also: consumer goods, retail, e-commerce, shopping)
+- consumer-discretionary (also: discretionary, luxury, entertainment, travel, automotive, cars)
+- consumer-staples (also: staples, food, beverages, household goods, groceries)
+- utilities (also: electric, water, power utilities, infrastructure utilities)
+- real-estate (also: realestate, property, housing, REITs, commercial real estate)
+- industrials (also: manufacturing, aerospace, defense, construction, machinery)
+- materials (also: mining, chemicals, metals, commodities, raw materials)
+- communication-services (also: communications, telecom, media, social media, streaming)
+
+User input: "{user_input}"
+
+Instructions:
+- Understand synonyms, abbreviations, and related industry terms
+- If user says "all" or "everything", return ALL sectors
+- If user mentions specific companies, map them to their sectors (e.g., Apple → technology)
+- Be flexible with phrasing (e.g., "tech stocks" → technology)
+- Handle multiple sectors (e.g., "tech and healthcare" → ["technology", "healthcare"])
+- Only return sector names from the valid list above
+
+Return ONLY a JSON array of sector names (use the exact names from the valid list).
+
+Examples:
+"tech and pharma" → ["technology", "healthcare"]
+"banks and insurance" → ["financial-services"]
+"renewable energy and EVs" → ["energy", "consumer-discretionary"]
+"software companies" → ["technology"]
+"retail and e-commerce" → ["consumer"]
+"all sectors" → [all 12 sectors listed]
+"defensive stocks" → ["utilities", "consumer-staples", "healthcare"]
+"growth sectors" → ["technology", "healthcare", "communication-services"]
+
+JSON array:"""
+
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,  # Slightly higher for better synonym matching
+            max_tokens=300
+        )
+        
+        content = response.choices[0].message.content.strip()
+        
+        # Debug output
+        if os.getenv("DEBUG_CHATBOT"):
+            print(f"[DEBUG] LLM Response: {content}")
+        
+        # Remove markdown code blocks if present
+        if content.startswith("```"):
+            lines = content.split("\n")
+            content = "\n".join(lines[1:-1]).strip()
+        
+        if content.startswith("json"):
+            content = content[4:].strip()
+        
+        parsed = json.loads(content)
+        
+        # Validate that all returned sectors are valid
+        if isinstance(parsed, list):
+            valid_parsed = [s for s in parsed if s in AVAILABLE_SECTORS]
+            return valid_parsed if valid_parsed else None
+        
+        return None
+    except json.JSONDecodeError as e:
+        if os.getenv("DEBUG_CHATBOT"):
+            print(f"[DEBUG] JSON parse error: {e}")
+            print(f"[DEBUG] Content was: {content}")
+        return None
+    except Exception as e:
+        if os.getenv("DEBUG_CHATBOT"):
+            print(f"[DEBUG] LLM parsing error: {type(e).__name__}: {e}")
+        return None
+
+
 def parse_with_llm(client: Any, user_input: str, context: str, valid_options: List[str]) -> Optional[List[str]]:
     """
     Use LLM to parse natural language input into structured selections.
@@ -364,6 +460,56 @@ def suggest_sectors_from_goals(goals: List[str]) -> List[str]:
     return sorted(list(suggested))
 
 
+def is_delegating_decision(client: Any, user_input: str, context: str) -> bool:
+    """
+    Use LLM to detect if user is delegating the decision to the system.
+    
+    Args:
+        client: Groq client
+        user_input: User's response
+        context: What decision is being delegated (e.g., "sector selection")
+    
+    Returns:
+        True if user is delegating, False otherwise
+    """
+    if not client:
+        return False
+    
+    try:
+        prompt = f"""Is the user delegating this decision to you or asking you to decide for them?
+
+Context: {context}
+User said: "{user_input}"
+
+Answer with ONLY "true" or "false".
+
+Examples:
+"whatever you think is best" → true
+"you decide" → true
+"up to you" → true
+"I trust your judgment" → true
+"you pick" → true
+"surprise me" → true
+"tech and healthcare" → false
+"1,2,3" → false
+"all sectors" → false
+
+Answer (true or false):"""
+
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=10
+        )
+        
+        answer = response.choices[0].message.content.strip().lower()
+        return answer == "true"
+        
+    except Exception:
+        return False
+
+
 def collect_sector_preferences(suggested_sectors: List[str]) -> List[str]:
     """Collect sector/industry preferences from user"""
     llm_client = get_llm_client()
@@ -380,90 +526,79 @@ def collect_sector_preferences(suggested_sectors: List[str]) -> List[str]:
         marker = " (suggested)" if sector in suggested_sectors else ""
         print(f"  {idx:2d}. {sector}{marker}")
     
-    print("\nOptions:")
+    print("\nHow to select:")
     if llm_client:
-        print("  - Describe sectors (e.g., 'tech and healthcare')")
+        print("  ✓ Natural language - describe any way you want:")
+        print("    'tech and pharma' / 'banks' / 'renewable energy and EVs'")
+        print("    'defensive stocks' / 'growth sectors' / 'all but energy'")
         if suggested_sectors:
-            print("  - Add to suggestions (e.g., 'suggested plus energy')")
-    print("  - Enter sector numbers (comma-separated, e.g., '1,2,5')")
-    print("  - Type 'all' to analyze all sectors")
+            print("  ✓ Build on suggestions: 'suggested plus energy and materials'")
+    print("  ✓ Numbers: '1,2,5' or just '1'")
+    print("  ✓ Type 'all' for all sectors")
     if suggested_sectors:
-        print("  - Press Enter to use suggested sectors")
+        print("  ✓ Press Enter to use suggested sectors")
     
     while True:
-        response = input("\nYour choice: ").strip().lower()
+        response = input("\nYour choice: ").strip()
         
         # Use suggested sectors if available and user presses Enter
         if not response and suggested_sectors:
             print(f"  -> Using suggested sectors: {', '.join(suggested_sectors)}")
             return suggested_sectors
         
+        response_lower = response.lower()
+        
+        # Check if user is delegating the decision (using LLM)
+        if llm_client and is_delegating_decision(llm_client, response, "sector selection"):
+            if suggested_sectors:
+                print(f"  -> Great! I'll use the suggested sectors based on your goals:")
+                print(f"     {', '.join(suggested_sectors)}")
+                return suggested_sectors
+            else:
+                # No suggestions available, use diversified approach
+                default_sectors = ["technology", "healthcare", "financial-services", "consumer", "industrials"]
+                print(f"  -> I'll select a diversified mix of sectors:")
+                print(f"     {', '.join(default_sectors)}")
+                return default_sectors
+        
         # Analyze all sectors
-        if response == "all":
+        if response_lower == "all":
             print(f"  -> Analyzing all {len(AVAILABLE_SECTORS)} sectors")
             return AVAILABLE_SECTORS.copy()
         
         # Check for "suggested + X" pattern
-        if suggested_sectors and any(keyword in response for keyword in ["suggested", "suggest", "recommendation"]):
+        if suggested_sectors and any(keyword in response_lower for keyword in ["suggested", "suggest", "recommendation"]):
             # Parse what to add to suggested sectors
             additional_sectors = []
             
             if llm_client:
-                # Use LLM to extract additional sectors from phrases like:
-                # "suggested plus energy"
-                # "suggested but also add tech and healthcare"
-                # "recommendations and also financial-services"
-                prompt = f"""The user wants the suggested sectors PLUS some additional sectors.
-
-Suggested sectors: {', '.join(suggested_sectors)}
-Available additional sectors: {', '.join([s for s in AVAILABLE_SECTORS if s not in suggested_sectors])}
-
-User said: "{response}"
-
-Extract ONLY the additional sectors the user wants to add (not the suggested ones they already have).
-Return a JSON array of sector names to ADD to the suggestions.
-
-Examples:
-"suggested plus energy" -> ["energy"]
-"suggested but also tech and healthcare" -> ["technology", "healthcare"]
-"recommendations and materials" -> ["materials"]
-
-JSON array:"""
+                # Extract what to add beyond suggested sectors
+                additional_text = response_lower
+                for keyword in ["suggested", "suggestions", "recommended", "recommendations"]:
+                    additional_text = additional_text.replace(keyword, "")
+                for connector in ["plus", "and", "also", "with", "add", "include"]:
+                    additional_text = additional_text.replace(connector, "")
                 
-                try:
-                    llm_response = llm_client.chat.completions.create(
-                        model="llama-3.3-70b-versatile",
-                        messages=[{"role": "user", "content": prompt}],
-                        temperature=0,
-                        max_tokens=150
-                    )
-                    
-                    content = llm_response.choices[0].message.content.strip()
-                    
-                    # Clean markdown
-                    if content.startswith("```"):
-                        lines = content.split("\n")
-                        content = "\n".join(lines[1:-1]).strip()
-                    if content.startswith("json"):
-                        content = content[4:].strip()
-                    
-                    additional_parsed = json.loads(content)
-                    if isinstance(additional_parsed, list):
-                        additional_sectors = [s for s in additional_parsed if s in AVAILABLE_SECTORS and s not in suggested_sectors]
+                additional_text = additional_text.strip()
                 
-                except Exception as e:
-                    if os.getenv("DEBUG_CHATBOT"):
-                        print(f"[DEBUG] Error parsing additional sectors: {e}")
+                if additional_text:
+                    # Parse the additional sectors
+                    additional_sectors = parse_sectors_with_llm(llm_client, additional_text)
+                    
+                    if additional_sectors:
+                        # Remove sectors already in suggested
+                        additional_sectors = [s for s in additional_sectors if s not in suggested_sectors]
             
             # Combine suggested + additional
             combined_sectors = suggested_sectors.copy()
             if additional_sectors:
                 combined_sectors.extend(additional_sectors)
-                print(f"  -> Suggested sectors: {', '.join(suggested_sectors)}")
-                print(f"  -> Plus additional: {', '.join(additional_sectors)}")
-                print(f"  -> Total: {len(combined_sectors)} sectors")
+                print(f"\n  ✓ Parsed your request:")
+                print(f"    • Suggested sectors: {', '.join(suggested_sectors)}")
+                print(f"    • Plus additional: {', '.join(additional_sectors)}")
+                print(f"    • Total: {len(combined_sectors)} sectors")
                 
-                confirm = input("  Is this correct? (yes/no): ").strip().lower()
+                confirm = input("\n  Is this correct? (yes/no): ").strip().lower()
                 if confirm in ["yes", "y", ""]:
                     return combined_sectors
                 else:
@@ -474,44 +609,60 @@ JSON array:"""
                 print(f"  -> Using suggested sectors: {', '.join(suggested_sectors)}")
                 return suggested_sectors
         
-        # Try LLM parsing for natural language
+        # Try LLM parsing for natural language (now with broader understanding)
         if llm_client and not response[0].isdigit():
-            parsed_sectors = parse_with_llm(
-                llm_client,
-                response,
-                "Sector/industry selection for financial analysis",
-                AVAILABLE_SECTORS
-            )
+            parsed_sectors = parse_sectors_with_llm(llm_client, response)
             
             if parsed_sectors:
-                print(f"  -> Understood: {', '.join(parsed_sectors)} ({len(parsed_sectors)} sectors)")
-                confirm = input("  Is this correct? (yes/no): ").strip().lower()
+                print(f"\n  ✓ Understood your request:")
+                print(f"    • Sectors: {', '.join(parsed_sectors)}")
+                print(f"    • Total: {len(parsed_sectors)} sectors")
+                
+                confirm = input("\n  Is this correct? (yes/no): ").strip().lower()
                 if confirm in ["yes", "y", ""]:
                     return parsed_sectors
                 else:
-                    print("  Let's try again...")
+                    print("\n  Let's try again. You can:")
+                    print("    - Rephrase your request")
+                    print("    - Use sector numbers instead (e.g., '1,2,5')")
+                    print("    - Type specific sector names")
                     continue
         
         # Parse sector numbers
-        try:
-            selected_indices = [int(x.strip()) for x in response.split(",")]
-            selected_sectors = []
-            
-            for idx in selected_indices:
-                if 1 <= idx <= len(AVAILABLE_SECTORS):
-                    selected_sectors.append(AVAILABLE_SECTORS[idx - 1])
+        if response[0].isdigit() or ',' in response:
+            try:
+                selected_indices = [int(x.strip()) for x in response.split(",")]
+                selected_sectors = []
+                
+                for idx in selected_indices:
+                    if 1 <= idx <= len(AVAILABLE_SECTORS):
+                        selected_sectors.append(AVAILABLE_SECTORS[idx - 1])
+                    else:
+                        raise ValueError(f"Invalid sector number: {idx}")
+                
+                if not selected_sectors:
+                    print("  [!] Please select at least one sector")
+                    continue
+                
+                print(f"\n  ✓ Selected {len(selected_sectors)} sectors:")
+                print(f"    • {', '.join(selected_sectors)}")
+                
+                confirm = input("\n  Proceed with these? (yes/no): ").strip().lower()
+                if confirm in ["yes", "y", ""]:
+                    return selected_sectors
                 else:
-                    raise ValueError(f"Invalid sector number: {idx}")
-            
-            if not selected_sectors:
-                print("  [!] Please select at least one sector")
+                    print("  Let's try again...")
+                    continue
+                
+            except (ValueError, IndexError) as e:
+                print(f"  [!] Could not parse numbers. Valid range: 1-{len(AVAILABLE_SECTORS)}")
                 continue
-            
-            print(f"  -> Selected {len(selected_sectors)} sectors: {', '.join(selected_sectors)}")
-            return selected_sectors
-            
-        except (ValueError, IndexError) as e:
-            print(f"  [!] Could not parse input. Try numbers, sector names, or 'all'.")
+        
+        # If nothing worked
+        print("  [!] Couldn't understand that input. Try:")
+        print("      - Natural language: 'tech and healthcare'")
+        print("      - Numbers: '1,2,5'")
+        print("      - 'all' for all sectors")
 
 
 def collect_risk_tolerance() -> str:
