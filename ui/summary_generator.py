@@ -126,27 +126,29 @@ def generate_risk_summary_with_citations(research_data: Dict[str, Any]) -> str:
                 for risk_item in risks[:3]:  # Top 3 risks per sector
                     risk_text = risk_item.get("risk", "N/A")
                     category = risk_item.get("category", "N/A")
-                    severity = risk_item.get("severity", "N/A")
-                    sources = risk_item.get("sources", [])
+                    article_count = risk_item.get("article_count", 0)
+                    articles = risk_item.get("articles", [])  # Changed from "sources" to "articles"
                     
                     risk_themes[sector].append({
                         "risk": risk_text,
                         "category": category,
-                        "severity": severity,
-                        "article_count": len(sources)
+                        "article_count": article_count
                     })
                     
-                    # Collect article citations
-                    for article in sources[:2]:  # Max 2 articles per risk
+                    # Collect article citations (top 2 articles per risk)
+                    for article in articles[:2]:
                         title = article.get("title", "")
-                        url = article.get("url", "")
-                        if title and url:
+                        date = article.get("date", "")
+                        source = article.get("source", "")
+                        
+                        if title:  # Only add if we have a title
                             if sector not in article_citations:
                                 article_citations[sector] = []
                             article_citations[sector].append({
-                                "title": title[:100],  # Truncate long titles
-                                "url": url,
-                                "related_risk": category
+                                "title": title[:120],  # Truncate long titles
+                                "date": date,
+                                "source": source,
+                                "related_risk": risk_text[:80]  # Show which risk this article relates to
                             })
     
     if not risk_themes:
@@ -177,14 +179,22 @@ Instructions:
         
         summary = response.choices[0].message.content.strip()
         
-        # Add article citations at the end
+        # Add article citations at the end with better formatting
         if article_citations:
-            summary += "\n\n📰 Related Articles:"
+            summary += "\n\n📰 Related News Articles:"
+            article_count = 0
             for sector, articles in list(article_citations.items())[:3]:  # Max 3 sectors
-                for article in articles[:2]:  # Max 2 articles per sector
-                    summary += f"\n  • [{sector.upper()}] {article['title']}"
-                    if article['url']:
-                        summary += f"\n    {article['url']}"
+                for article in articles[:3]:  # Max 3 articles per sector
+                    if article_count >= 8:  # Limit total articles to 8
+                        break
+                    summary += f"\n\n  [{sector.upper()}] {article['title']}"
+                    if article.get('related_risk'):
+                        summary += f"\n  Risk: {article['related_risk']}"
+                    if article.get('source'):
+                        summary += f"\n  Source: {article['source']}"
+                    article_count += 1
+                if article_count >= 8:
+                    break
         
         return summary
     
