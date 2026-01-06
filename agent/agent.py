@@ -319,9 +319,22 @@ class FinsenseCoordinator:
         var_data = json.loads(content)
         return var_data
 
-    async def conduct_research(self, sectors: List[str], risk_tolerance: str = "medium") -> Dict[str, Any]:
+    async def conduct_research(self, sectors: List[str], risk_tolerance: str = "medium", investment_goals: List[str] = None) -> Dict[str, Any]:
         """
         Coordinates the research process by aggregating data from all MCP servers.
+        
+        Args:
+            sectors: List of sector names to analyze
+            risk_tolerance: User's risk tolerance (low/medium/high)
+            investment_goals: Optional list of investment goals (growth, income, esg, value, defensive, diversified)
+        
+        Improvements:
+        - Timeout protection (30s per operation)
+        - Detailed error categorization
+        - Progress tracking
+        - Partial success handling
+        - Summary statistics
+        - Goal-based filtering and recommendations
         
         Flow:
         1. Fetch broad market context (Market Server)
@@ -330,56 +343,365 @@ class FinsenseCoordinator:
            - Analyze volatility and risk metrics (Risk Server)
            - Extract risk themes from news (News Server)
         3. Analyze cross-sector correlations (Risk Server)
+        4. Apply goal-based filtering and ranking
         """
-        logger.info("Beginning coordinated research on sectors: %s", sectors)
+        investment_goals = investment_goals or []
+        
+        logger.info("="*60)
+        logger.info("STARTING COORDINATED RESEARCH")
+        logger.info("Sectors: %s | Risk Tolerance: %s", sectors, risk_tolerance)
+        if investment_goals:
+            logger.info("Investment Goals: %s", ", ".join(investment_goals))
+        logger.info("="*60)
+        
+        # Track statistics
+        stats = {
+            "total_operations": 0,
+            "successful_operations": 0,
+            "failed_operations": 0,
+            "timeouts": 0,
+            "errors_by_type": {}
+        }
         
         research_data = {
             "parameters": {
                 "sectors": sectors,
-                "risk_tolerance": risk_tolerance
+                "risk_tolerance": risk_tolerance,
+                "investment_goals": investment_goals
             },
             "market_context": {},
             "sector_deep_dives": {},
-            "portfolio_implications": {}
+            "portfolio_implications": {},
+            "goal_based_recommendations": {},
+            "execution_summary": {}
         }
 
         # 1. Broad Market Context
+        logger.info("\n[1/3] Fetching market context...")
+        stats["total_operations"] += 1
         try:
-            research_data["market_context"] = await self.get_market_indices()
+            async with asyncio.timeout(30.0):
+                research_data["market_context"] = await self.get_market_indices()
+                stats["successful_operations"] += 1
+                logger.info("✓ Market context retrieved successfully")
+        except asyncio.TimeoutError:
+            stats["failed_operations"] += 1
+            stats["timeouts"] += 1
+            error_msg = "Market indices request timed out after 30s"
+            logger.error("✗ %s", error_msg)
+            research_data["market_context"] = {
+                "error": error_msg,
+                "error_type": "timeout"
+            }
         except Exception as e:
-            logger.error("Failed to fetch market indices: %s", e)
-            research_data["market_context"] = {"error": str(e)}
+            stats["failed_operations"] += 1
+            error_type = type(e).__name__
+            stats["errors_by_type"][error_type] = stats["errors_by_type"].get(error_type, 0) + 1
+            logger.error("✗ Market context failed: %s: %s", error_type, str(e)[:100])
+            research_data["market_context"] = {
+                "error": str(e),
+                "error_type": error_type
+            }
 
         # 2. Deep Dive per Sector
-        for sector in sectors:
-            logger.info("Analyzing sector: %s", sector)
+        logger.info("\n[2/3] Analyzing %d sectors...", len(sectors))
+        for idx, sector in enumerate(sectors, 1):
+            logger.info("\n  Sector %d/%d: %s", idx, len(sectors), sector.upper())
             
-            # Run independent analysis tasks in parallel across different servers
-            tasks = [
-                self.get_sector_summary(sector),
-                self.compute_sector_volatility(sector, "1y"),
-                self.extract_risk_themes(sector, "1m")
-            ]
+            sector_data = {
+                "market_performance": None,
+                "risk_profile": None,
+                "news_analysis": None,
+                "errors": []
+            }
+            
+            # Run independent analysis tasks in parallel with timeout protection
+            async def get_market_performance():
+                async with asyncio.timeout(30.0):
+                    return await self.get_sector_summary(sector)
+            
+            async def get_risk_profile():
+                async with asyncio.timeout(30.0):
+                    return await self.compute_sector_volatility(sector, "1y")
+            
+            async def get_news_analysis():
+                async with asyncio.timeout(30.0):
+                    return await self.extract_risk_themes(sector, "1m")
+            
+            tasks = [get_market_performance(), get_risk_profile(), get_news_analysis()]
+            task_names = ["market_performance", "risk_profile", "news_analysis"]
+            stats["total_operations"] += len(tasks)
             
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
-            sector_data = {
-                "market_performance": results[0] if not isinstance(results[0], Exception) else {"error": str(results[0])},
-                "risk_profile": results[1] if not isinstance(results[1], Exception) else {"error": str(results[1])},
-                "news_analysis": results[2] if not isinstance(results[2], Exception) else {"error": str(results[2])}
-            }
+            # Process results with detailed error handling
+            for task_name, result in zip(task_names, results):
+                if isinstance(result, asyncio.TimeoutError):
+                    stats["failed_operations"] += 1
+                    stats["timeouts"] += 1
+                    error_msg = f"{task_name} timed out after 30s"
+                    sector_data[task_name] = {"error": error_msg, "error_type": "timeout"}
+                    sector_data["errors"].append(error_msg)
+                    logger.warning("    ✗ %s: timeout", task_name)
+                elif isinstance(result, Exception):
+                    stats["failed_operations"] += 1
+                    error_type = type(result).__name__
+                    stats["errors_by_type"][error_type] = stats["errors_by_type"].get(error_type, 0) + 1
+                    error_msg = f"{task_name}: {error_type}"
+                    sector_data[task_name] = {
+                        "error": str(result)[:200],
+                        "error_type": error_type
+                    }
+                    sector_data["errors"].append(error_msg)
+                    logger.warning("    ✗ %s: %s", task_name, error_type)
+                else:
+                    stats["successful_operations"] += 1
+                    sector_data[task_name] = result
+                    logger.info("    ✓ %s", task_name)
+            
+            # Calculate success rate for this sector
+            sector_success_count = sum(1 for v in [sector_data["market_performance"], 
+                                                     sector_data["risk_profile"], 
+                                                     sector_data["news_analysis"]] 
+                                        if v and "error" not in v)
+            logger.info("  → Sector complete: %d/3 operations successful", sector_success_count)
             
             research_data["sector_deep_dives"][sector] = sector_data
 
         # 3. Cross-Sector Analysis
         if len(sectors) > 1:
+            logger.info("\n[3/3] Computing cross-sector correlations...")
+            stats["total_operations"] += 1
             try:
-                correlations = await self.compute_sector_correlations(sectors, "1y")
-                research_data["portfolio_implications"]["correlations"] = correlations
+                async with asyncio.timeout(30.0):
+                    correlations = await self.compute_sector_correlations(sectors, "1y")
+                    research_data["portfolio_implications"]["correlations"] = correlations
+                    stats["successful_operations"] += 1
+                    logger.info("✓ Correlations computed successfully")
+            except asyncio.TimeoutError:
+                stats["failed_operations"] += 1
+                stats["timeouts"] += 1
+                logger.error("✗ Correlation analysis timed out after 30s")
+                research_data["portfolio_implications"]["correlations"] = {
+                    "error": "Correlation analysis timed out",
+                    "error_type": "timeout"
+                }
             except Exception as e:
-                logger.error("Failed to compute correlations: %s", e)
+                stats["failed_operations"] += 1
+                error_type = type(e).__name__
+                stats["errors_by_type"][error_type] = stats["errors_by_type"].get(error_type, 0) + 1
+                logger.error("✗ Correlation analysis failed: %s: %s", error_type, str(e)[:100])
+                research_data["portfolio_implications"]["correlations"] = {
+                    "error": str(e),
+                    "error_type": error_type
+                }
+        else:
+            logger.info("\n[3/3] Skipping correlations (only 1 sector)")
+
+        # 4. Apply goal-based filtering and recommendations
+        if investment_goals:
+            logger.info("\n[4/4] Applying goal-based filtering...")
+            research_data["goal_based_recommendations"] = self._filter_by_goals(
+                research_data["sector_deep_dives"],
+                investment_goals,
+                risk_tolerance
+            )
+            logger.info("✓ Generated %d goal-aligned recommendations", 
+                       len(research_data["goal_based_recommendations"].get("ranked_sectors", [])))
+
+        # Add execution summary
+        success_rate = (stats["successful_operations"] / stats["total_operations"] * 100) if stats["total_operations"] > 0 else 0
+        research_data["execution_summary"] = {
+            "total_operations": stats["total_operations"],
+            "successful": stats["successful_operations"],
+            "failed": stats["failed_operations"],
+            "timeouts": stats["timeouts"],
+            "success_rate": f"{success_rate:.1f}%",
+            "errors_by_type": stats["errors_by_type"]
+        }
+        
+        logger.info("\n" + "="*60)
+        logger.info("RESEARCH COMPLETE")
+        logger.info("Success: %d/%d operations (%.1f%%)", 
+                   stats["successful_operations"], 
+                   stats["total_operations"],
+                   success_rate)
+        if stats["timeouts"] > 0:
+            logger.warning("Timeouts: %d", stats["timeouts"])
+        if stats["errors_by_type"]:
+            logger.warning("Errors by type: %s", dict(stats["errors_by_type"]))
+        logger.info("="*60)
 
         return research_data
+
+    def _filter_by_goals(self, sector_data: Dict[str, Any], goals: List[str], risk_tolerance: str) -> Dict[str, Any]:
+        """
+        Filter and rank sectors based on investment goals.
+        
+        Args:
+            sector_data: Sector deep dive data from research
+            goals: List of investment goals (growth, income, esg, value, defensive, diversified)
+            risk_tolerance: User's risk tolerance
+            
+        Returns:
+            Dict with ranked_sectors and reasoning
+        """
+        goal_criteria = {
+            "growth": {
+                "prioritize": "high_performance",
+                "max_volatility": {"low": 20, "medium": 30, "high": 50},
+                "desc": "High-performing sectors with acceptable volatility for growth"
+            },
+            "income": {
+                "prioritize": "low_volatility",
+                "max_volatility": {"low": 15, "medium": 20, "high": 25},
+                "desc": "Stable, low-volatility sectors suitable for dividend income"
+            },
+            "esg": {
+                "prioritize": "esg_friendly",
+                "preferred_sectors": ["utilities", "healthcare", "technology"],
+                "desc": "Environmentally and socially responsible sectors"
+            },
+            "value": {
+                "prioritize": "undervalued",
+                "preferred_sectors": ["financial-services", "energy", "industrials", "materials"],
+                "desc": "Potentially undervalued sectors with strong fundamentals"
+            },
+            "defensive": {
+                "prioritize": "low_volatility",
+                "max_volatility": {"low": 12, "medium": 18, "high": 22},
+                "preferred_sectors": ["consumer-staples", "utilities", "healthcare"],
+                "desc": "Defensive sectors for capital preservation"
+            },
+            "diversified": {
+                "prioritize": "balanced",
+                "desc": "Diversified exposure across multiple sectors"
+            }
+        }
+        
+        ranked_sectors = []
+        
+        for sector_name, data in sector_data.items():
+            if "error" in data or not data:
+                continue
+                
+            # Extract metrics
+            risk_profile = data.get("risk_profile", {})
+            market_perf = data.get("market_performance", {})
+            news_analysis = data.get("news_analysis", {})
+            
+            # Parse volatility
+            vol_str = risk_profile.get("annualized_volatility", "N/A")
+            try:
+                if isinstance(vol_str, str) and "%" in vol_str:
+                    volatility = float(vol_str.replace("%", ""))
+                elif isinstance(vol_str, (int, float)):
+                    volatility = float(vol_str)
+                else:
+                    volatility = None
+            except:
+                volatility = None
+            
+            # Parse 1-month performance
+            perf_1m_str = market_perf.get("performance_1m", "N/A")
+            try:
+                if isinstance(perf_1m_str, str) and "%" in perf_1m_str:
+                    perf_1m = float(perf_1m_str.replace("%", ""))
+                elif isinstance(perf_1m_str, (int, float)):
+                    perf_1m = float(perf_1m_str)
+                else:
+                    perf_1m = None
+            except:
+                perf_1m = None
+            
+            # Score sector based on goals
+            score = 0
+            reasons = []
+            
+            for goal in goals:
+                if goal not in goal_criteria:
+                    continue
+                    
+                criteria = goal_criteria[goal]
+                
+                if criteria.get("prioritize") == "high_performance" and perf_1m is not None:
+                    # Growth goal: reward high performance
+                    if perf_1m > 5:
+                        score += 30
+                        reasons.append(f"Strong 1M performance ({perf_1m:.1f}%)")
+                    elif perf_1m > 0:
+                        score += 10
+                    
+                    # Check volatility acceptable for risk tolerance
+                    max_vol = criteria.get("max_volatility", {}).get(risk_tolerance, 30)
+                    if volatility and volatility <= max_vol:
+                        score += 10
+                        reasons.append(f"Volatility within {risk_tolerance} risk tolerance")
+                
+                elif criteria.get("prioritize") == "low_volatility" and volatility is not None:
+                    # Income/Defensive goals: reward low volatility
+                    max_vol = criteria.get("max_volatility", {}).get(risk_tolerance, 20)
+                    if volatility <= max_vol:
+                        score += 30
+                        reasons.append(f"Low volatility ({volatility:.1f}%)")
+                    
+                    # Stable/positive performance is a bonus
+                    if perf_1m is not None and perf_1m > 0:
+                        score += 10
+                        reasons.append("Positive recent performance")
+                
+                elif criteria.get("prioritize") == "esg_friendly":
+                    # ESG goal: prioritize specific sectors
+                    preferred = criteria.get("preferred_sectors", [])
+                    if sector_name in preferred:
+                        score += 25
+                        reasons.append(f"ESG-aligned sector")
+                    
+                    # Low risk themes count
+                    risk_count = len(news_analysis.get("identified_risks", []))
+                    if risk_count < 15:
+                        score += 10
+                        reasons.append("Few identified risk themes")
+                
+                elif criteria.get("prioritize") == "undervalued":
+                    # Value goal: prioritize specific sectors
+                    preferred = criteria.get("preferred_sectors", [])
+                    if sector_name in preferred:
+                        score += 25
+                        reasons.append("Traditional value sector")
+                
+                elif criteria.get("prioritize") == "balanced":
+                    # Diversified: reward moderate metrics
+                    if volatility and 15 <= volatility <= 25:
+                        score += 15
+                        reasons.append("Moderate volatility")
+                    if perf_1m is not None and perf_1m > -5:
+                        score += 10
+            
+            # Add sector to rankings
+            if score > 0:
+                ranked_sectors.append({
+                    "sector": sector_name,
+                    "score": score,
+                    "volatility": f"{volatility:.2f}%" if volatility else "N/A",
+                    "performance_1m": f"{perf_1m:.2f}%" if perf_1m else "N/A",
+                    "reasons": reasons,
+                    "risk_level": risk_profile.get("percentile", "N/A")
+                })
+        
+        # Sort by score (descending)
+        ranked_sectors.sort(key=lambda x: x["score"], reverse=True)
+        
+        # Generate summary
+        top_picks = ranked_sectors[:3] if len(ranked_sectors) >= 3 else ranked_sectors
+        
+        return {
+            "ranked_sectors": ranked_sectors,
+            "top_picks": top_picks,
+            "goals_applied": goals,
+            "risk_tolerance": risk_tolerance,
+            "summary": f"Identified {len(ranked_sectors)} sectors aligned with your goals"
+        }
 
     async def cleanup(self):
         """Clean up all connections"""
@@ -399,125 +721,3 @@ class FinsenseCoordinator:
         
         # Give event loop time to clean up
         await asyncio.sleep(0.1)
-
-
-async def main():
-    """
-    Main entry point for the Finsense Agent.
-    Simulates a user interaction session.
-    """
-    coordinator = FinsenseCoordinator()
-    
-    try:
-        await coordinator.initialize()
-        
-        # Example User Scenario:
-        # "A user with low-risk tolerance wants to invest in an environmentally conscious manner."
-        
-        print("\n" + "="*80)
-        print("FINSENSE AGENT - RESEARCH SESSION")
-        print("="*80)
-        print("User Profile: Low Risk Tolerance")
-        print("Interests: Environmentally Conscious Investing")
-        print("-" * 80)
-        
-        # Analyze all major sectors to find best matches for user tolerance
-        target_sectors = [
-            "technology", "healthcare", "financial-services", "energy", 
-            "consumer-discretionary", "consumer-staples", "utilities", 
-            "real-estate", "industrials", "materials", "communication-services"
-        ]
-        
-        print(f"Identified Target Sectors: {', '.join(target_sectors)}")
-        print("Starting coordinated analysis...")
-        
-        research_results = await coordinator.conduct_research(target_sectors, risk_tolerance="low")
-        
-        # Display Results
-        print("\n" + "="*80)
-        print("RESEARCH FINDINGS")
-        print("="*80)
-        
-        # Market Context
-        indices = research_results.get("market_context", {})
-        print(f"\n[Market Context]")
-        for name, data in indices.items():
-            if isinstance(data, dict):
-                print(f"  {name}: {data.get('value')} ({data.get('change')})")
-        
-        # Sector Findings
-        print(f"\n[Sector Analysis]")
-        for sector, data in research_results.get("sector_deep_dives", {}).items():
-            print(f"\n>> {sector.upper()}")
-            
-            # Performance
-            perf = data.get("market_performance", {})
-            print(f"  Performance (1M): {perf.get('performance_1m', 'N/A')}")
-            
-            # Risk
-            risk = data.get("risk_profile", {})
-            vol = risk.get("annualized_volatility", "N/A")
-            print(f"  Volatility (1Y): {vol}")
-            
-            # News/Themes
-            news = data.get("news_analysis", {})
-            risks = news.get("identified_risks", [])
-            print(f"  Key Risks Identified: {len(risks)}")
-            for r in risks[:2]: # Show top 2
-                print(f"    - {r.get('risk', 'N/A')} ({r.get('category', 'N/A')})")
-                
-        # Suggestions based on User Profile
-        print("\n" + "="*80)
-        print("SUGGESTED RESEARCH PATH")
-        print("="*80)
-        
-        # Filter for Low Risk (Low Volatility)
-        sector_metrics = []
-        for sector, data in research_results.get("sector_deep_dives", {}).items():
-            risk_profile = data.get("risk_profile", {})
-            vol_raw = risk_profile.get("annualized_volatility", "N/A")
-            
-            # Simple parsing for sorting (assuming string "XX.X%" or float)
-            try:
-                if isinstance(vol_raw, str) and "%" in vol_raw:
-                    vol_val = float(vol_raw.strip("%"))
-                else:
-                    vol_val = float(vol_raw)
-            except (ValueError, TypeError):
-                vol_val = 100.0  # High default if unknown
-                
-            sector_metrics.append((sector, vol_val, vol_raw))
-            
-        # Sort by volatility ascending
-        sector_metrics.sort(key=lambda x: x[1])
-        
-        print("Based on your 'Low Risk' tolerance, consider researching these stable sectors first:")
-        for sector, val, display in sector_metrics[:4]:
-            print(f"  • {sector.upper()} (Volatility: {display})")
-            
-        print("\nRegarding 'Environmentally Conscious' preference:")
-        print("  • Cross-reference the low-volatility sectors above with ESG ratings.")
-        print("  • Note: Sectors like Utilities may have mixed environmental impacts depending on the specific companies.")
-
-        # Correlations
-        print(f"\n[Portfolio Implications]")
-        correlations = research_results.get("portfolio_implications", {}).get("correlations", {})
-        if correlations:
-            print(f"  Diversification Score: {correlations.get('diversification_score', 'N/A')}")
-            insights = correlations.get("insights", {}).get("best_diversification_opportunities", [])
-            if insights:
-                print(f"  Diversification Opportunities: {', '.join(insights)}")
-
-        print("\n" + "="*80)
-        print("Analysis Complete.")
-        print("="*80)
-
-    except Exception as e:
-        logger.exception("Error: %s", e)
-    finally:
-        await coordinator.cleanup()
-
-
-if __name__ == "__main__":
-    # Run the async main function
-    asyncio.run(main())
