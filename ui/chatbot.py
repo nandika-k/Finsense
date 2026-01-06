@@ -881,12 +881,12 @@ def run_chatbot() -> Optional[Dict]:
         if goals is None:
             goals = collect_investment_goals()
         else:
-            # Confirm and allow modification
+            # Confirm parsed values
             print("\n[Investment Goals]")
             goal_names = [INVESTMENT_GOALS[g]["name"] for g in goals]
-            print(f"  Current: {', '.join(goal_names)}")
-            modify = input("  Change these? (yes/no): ").strip().lower()
-            if modify in ["yes", "y"]:
+            print(f"  Understood: {', '.join(goal_names)}")
+            correct = input("  Is this correct? (yes/no): ").strip().lower()
+            if correct in ["no", "n"]:
                 goals = collect_investment_goals()
         
         # Step 2: Sector Selection (if not provided)
@@ -894,11 +894,11 @@ def run_chatbot() -> Optional[Dict]:
             suggested_sectors = suggest_sectors_from_goals(goals)
             sectors = collect_sector_preferences(suggested_sectors)
         else:
-            # Confirm and allow modification
+            # Confirm parsed values
             print("\n[Sectors to Analyze]")
-            print(f"  Current: {', '.join(sectors)} ({len(sectors)} total)")
-            modify = input("  Change these? (yes/no): ").strip().lower()
-            if modify in ["yes", "y"]:
+            print(f"  Understood: {', '.join(sectors)} ({len(sectors)} total)")
+            correct = input("  Is this correct? (yes/no): ").strip().lower()
+            if correct in ["no", "n"]:
                 suggested_sectors = suggest_sectors_from_goals(goals)
                 sectors = collect_sector_preferences(suggested_sectors)
         
@@ -906,11 +906,11 @@ def run_chatbot() -> Optional[Dict]:
         if risk_tolerance is None:
             risk_tolerance = collect_risk_tolerance()
         else:
-            # Confirm and allow modification
+            # Confirm parsed value
             print("\n[Risk Tolerance]")
-            print(f"  Current: {risk_tolerance.upper()}")
-            modify = input("  Change this? (yes/no): ").strip().lower()
-            if modify in ["yes", "y"]:
+            print(f"  Understood: {risk_tolerance.upper()}")
+            correct = input("  Is this correct? (yes/no): ").strip().lower()
+            if correct in ["no", "n"]:
                 risk_tolerance = collect_risk_tolerance()
         
         # Final Confirmation
