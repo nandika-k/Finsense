@@ -78,6 +78,109 @@ INVESTMENT_GOALS = {
 RISK_TOLERANCE_LEVELS = ["low", "medium", "high"]
 
 
+def parse_initial_query(user_input: str) -> Dict[str, Any]:
+    """
+    Parse an initial open-ended query for goals, sectors, and risk tolerance.
+    
+    Returns dict with:
+        - goals: List[str] or None
+        - sectors: List[str] or None
+        - risk_tolerance: str or None
+    """
+    llm_client = get_llm_client()
+    
+    if not llm_client:
+        # Fallback: basic keyword matching without LLM
+        result = {"goals": None, "sectors": None, "risk_tolerance": None}
+        
+        # Check for risk tolerance keywords
+        user_lower = user_input.lower()
+        if any(word in user_lower for word in ["low risk", "conservative", "safe", "stable"]):
+            result["risk_tolerance"] = "low"
+        elif any(word in user_lower for word in ["high risk", "aggressive", "growth"]):
+            result["risk_tolerance"] = "high"
+        elif any(word in user_lower for word in ["medium risk", "moderate", "balanced"]):
+            result["risk_tolerance"] = "medium"
+        
+        return result
+    
+    # Use LLM for comprehensive parsing
+    try:
+        prompt = f"""Parse this investment query and extract investment goals, sectors, and risk tolerance.
+
+AVAILABLE INVESTMENT GOALS: {', '.join(INVESTMENT_GOALS.keys())}
+AVAILABLE SECTORS: {', '.join(AVAILABLE_SECTORS)}
+RISK TOLERANCE LEVELS: low, medium, high
+
+User query: "{user_input}"
+
+Extract and return ONLY a JSON object with these fields (use null if not mentioned):
+{{
+  "goals": [list of goal keys that match the query, or null],
+  "sectors": [list of sector names that match the query, or null],
+  "risk_tolerance": "low" or "medium" or "high" or null
+}}
+
+Examples:
+Query: "I want growth in tech and healthcare with low risk"
+Result: {{"goals": ["growth"], "sectors": ["technology", "healthcare"], "risk_tolerance": "low"}}
+
+Query: "ESG investing"
+Result: {{"goals": ["esg"], "sectors": null, "risk_tolerance": null}}
+
+Query: "Analyze everything"
+Result: {{"goals": null, "sectors": null, "risk_tolerance": null}}
+
+JSON object:"""
+
+        response = llm_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=300
+        )
+        
+        content = response.choices[0].message.content.strip()
+        
+        # Remove markdown code blocks
+        if content.startswith("```"):
+            lines = content.split("\n")
+            content = "\n".join(lines[1:-1]).strip()
+        
+        if content.startswith("json"):
+            content = content[4:].strip()
+        
+        parsed = json.loads(content)
+        
+        # Validate and clean the parsed data
+        result = {
+            "goals": None,
+            "sectors": None,
+            "risk_tolerance": None
+        }
+        
+        # Validate goals
+        if parsed.get("goals") and isinstance(parsed["goals"], list):
+            valid_goals = [g for g in parsed["goals"] if g in INVESTMENT_GOALS]
+            result["goals"] = valid_goals if valid_goals else None
+        
+        # Validate sectors
+        if parsed.get("sectors") and isinstance(parsed["sectors"], list):
+            valid_sectors = [s for s in parsed["sectors"] if s in AVAILABLE_SECTORS]
+            result["sectors"] = valid_sectors if valid_sectors else None
+        
+        # Validate risk tolerance
+        if parsed.get("risk_tolerance") in ["low", "medium", "high"]:
+            result["risk_tolerance"] = parsed["risk_tolerance"]
+        
+        return result
+        
+    except Exception as e:
+        if os.getenv("DEBUG_CHATBOT"):
+            print(f"[DEBUG] LLM parsing error: {e}")
+        return {"goals": None, "sectors": None, "risk_tolerance": None}
+
+
 def get_llm_client() -> Optional[Any]:
     """Get Groq client if API key is available"""
     if not HAS_GROQ:
@@ -280,6 +383,8 @@ def collect_sector_preferences(suggested_sectors: List[str]) -> List[str]:
     print("\nOptions:")
     if llm_client:
         print("  - Describe sectors (e.g., 'tech and healthcare')")
+        if suggested_sectors:
+            print("  - Add to suggestions (e.g., 'suggested plus energy')")
     print("  - Enter sector numbers (comma-separated, e.g., '1,2,5')")
     print("  - Type 'all' to analyze all sectors")
     if suggested_sectors:
@@ -297,6 +402,77 @@ def collect_sector_preferences(suggested_sectors: List[str]) -> List[str]:
         if response == "all":
             print(f"  -> Analyzing all {len(AVAILABLE_SECTORS)} sectors")
             return AVAILABLE_SECTORS.copy()
+        
+        # Check for "suggested + X" pattern
+        if suggested_sectors and any(keyword in response for keyword in ["suggested", "suggest", "recommendation"]):
+            # Parse what to add to suggested sectors
+            additional_sectors = []
+            
+            if llm_client:
+                # Use LLM to extract additional sectors from phrases like:
+                # "suggested plus energy"
+                # "suggested but also add tech and healthcare"
+                # "recommendations and also financial-services"
+                prompt = f"""The user wants the suggested sectors PLUS some additional sectors.
+
+Suggested sectors: {', '.join(suggested_sectors)}
+Available additional sectors: {', '.join([s for s in AVAILABLE_SECTORS if s not in suggested_sectors])}
+
+User said: "{response}"
+
+Extract ONLY the additional sectors the user wants to add (not the suggested ones they already have).
+Return a JSON array of sector names to ADD to the suggestions.
+
+Examples:
+"suggested plus energy" -> ["energy"]
+"suggested but also tech and healthcare" -> ["technology", "healthcare"]
+"recommendations and materials" -> ["materials"]
+
+JSON array:"""
+                
+                try:
+                    llm_response = llm_client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0,
+                        max_tokens=150
+                    )
+                    
+                    content = llm_response.choices[0].message.content.strip()
+                    
+                    # Clean markdown
+                    if content.startswith("```"):
+                        lines = content.split("\n")
+                        content = "\n".join(lines[1:-1]).strip()
+                    if content.startswith("json"):
+                        content = content[4:].strip()
+                    
+                    additional_parsed = json.loads(content)
+                    if isinstance(additional_parsed, list):
+                        additional_sectors = [s for s in additional_parsed if s in AVAILABLE_SECTORS and s not in suggested_sectors]
+                
+                except Exception as e:
+                    if os.getenv("DEBUG_CHATBOT"):
+                        print(f"[DEBUG] Error parsing additional sectors: {e}")
+            
+            # Combine suggested + additional
+            combined_sectors = suggested_sectors.copy()
+            if additional_sectors:
+                combined_sectors.extend(additional_sectors)
+                print(f"  -> Suggested sectors: {', '.join(suggested_sectors)}")
+                print(f"  -> Plus additional: {', '.join(additional_sectors)}")
+                print(f"  -> Total: {len(combined_sectors)} sectors")
+                
+                confirm = input("  Is this correct? (yes/no): ").strip().lower()
+                if confirm in ["yes", "y", ""]:
+                    return combined_sectors
+                else:
+                    print("  Let's try again...")
+                    continue
+            else:
+                # No additional sectors found, just use suggested
+                print(f"  -> Using suggested sectors: {', '.join(suggested_sectors)}")
+                return suggested_sectors
         
         # Try LLM parsing for natural language
         if llm_client and not response[0].isdigit():
@@ -412,6 +588,23 @@ def confirm_preferences(goals: List[str], sectors: List[str], risk_tolerance: st
             print("  [!] Please enter 'yes' or 'no'")
 
 
+def show_goal_suggestions():
+    """Display all available investment goals as suggestions"""
+    print("\n" + "="*80)
+    print("AVAILABLE INVESTMENT GOALS")
+    print("="*80)
+    print("\nHere are the investment goals you can choose from:\n")
+    
+    for idx, (key, info) in enumerate(INVESTMENT_GOALS.items(), 1):
+        print(f"{idx}. {info['name']}")
+        print(f"   {info['description']}")
+        print(f"   Suggested sectors: {', '.join(info['suggested_sectors'])}")
+        print()
+    
+    print("You can also choose 'Exploratory' mode with no specific goals.")
+    print("="*80)
+
+
 def run_chatbot() -> Optional[Dict]:
     """
     Run the complete chatbot conversation flow.
@@ -422,19 +615,105 @@ def run_chatbot() -> Optional[Dict]:
     """
     display_welcome()
     
+    llm_client = get_llm_client()
+    
     # Conversation loop (allow restart if user rejects confirmation)
     while True:
-        # Step 1: Collect goals
-        goals = collect_investment_goals()
+        # Start with open-ended question
+        print("\n" + "="*80)
+        print("TELL ME ABOUT YOUR INVESTMENT INTERESTS")
+        print("="*80)
+        print("\nYou can tell me everything at once, or we'll go step-by-step.")
+        print("\nExamples:")
+        print("  • 'I want growth in technology with medium risk'")
+        print("  • 'ESG investing in healthcare and energy sectors'")
+        print("  • 'Low risk defensive strategy'")
+        print("  • Type 'ideas' or 'help' to see available goal options")
+        print("  • Just press Enter to go through each question\n")
         
-        # Step 2: Suggest and collect sectors
-        suggested_sectors = suggest_sectors_from_goals(goals)
-        sectors = collect_sector_preferences(suggested_sectors)
+        initial_input = input("What are you looking for? ").strip()
         
-        # Step 3: Collect risk tolerance (mandatory)
-        risk_tolerance = collect_risk_tolerance()
+        # Check if user is asking for ideas/suggestions about goals
+        if initial_input:
+            asking_for_help = any(keyword in initial_input.lower() for keyword in [
+                "ideas", "suggestions", "help", "what goals", "what options", 
+                "what can", "show me", "list goals", "available goals",
+                "don't know", "not sure", "unsure"
+            ])
+            
+            if asking_for_help:
+                show_goal_suggestions()
+                print("\nNow that you've seen the options, let's try again!")
+                continue  # Restart the loop to ask the question again
         
-        # Confirmation
+        # Parse initial query
+        if initial_input:
+            print("\n  Analyzing your request...")
+            parsed = parse_initial_query(initial_input)
+            
+            goals = parsed.get("goals")
+            sectors = parsed.get("sectors")
+            risk_tolerance = parsed.get("risk_tolerance")
+            
+            # Show what was understood
+            understood = []
+            if goals:
+                goal_names = [INVESTMENT_GOALS[g]["name"] for g in goals]
+                understood.append(f"Goals: {', '.join(goal_names)}")
+            if sectors:
+                understood.append(f"Sectors: {', '.join(sectors)}")
+            if risk_tolerance:
+                understood.append(f"Risk: {risk_tolerance.upper()}")
+            
+            if understood:
+                print("\n  ✓ Understood:")
+                for item in understood:
+                    print(f"    • {item}")
+        else:
+            goals = None
+            sectors = None
+            risk_tolerance = None
+        
+        # Ask follow-up questions for missing information
+        print("\n" + "-"*80)
+        
+        # Step 1: Investment Goals (if not provided)
+        if goals is None:
+            goals = collect_investment_goals()
+        else:
+            # Confirm and allow modification
+            print("\n[Investment Goals]")
+            goal_names = [INVESTMENT_GOALS[g]["name"] for g in goals]
+            print(f"  Current: {', '.join(goal_names)}")
+            modify = input("  Change these? (yes/no): ").strip().lower()
+            if modify in ["yes", "y"]:
+                goals = collect_investment_goals()
+        
+        # Step 2: Sector Selection (if not provided)
+        if sectors is None:
+            suggested_sectors = suggest_sectors_from_goals(goals)
+            sectors = collect_sector_preferences(suggested_sectors)
+        else:
+            # Confirm and allow modification
+            print("\n[Sectors to Analyze]")
+            print(f"  Current: {', '.join(sectors)} ({len(sectors)} total)")
+            modify = input("  Change these? (yes/no): ").strip().lower()
+            if modify in ["yes", "y"]:
+                suggested_sectors = suggest_sectors_from_goals(goals)
+                sectors = collect_sector_preferences(suggested_sectors)
+        
+        # Step 3: Risk Tolerance (mandatory, must be specified)
+        if risk_tolerance is None:
+            risk_tolerance = collect_risk_tolerance()
+        else:
+            # Confirm and allow modification
+            print("\n[Risk Tolerance]")
+            print(f"  Current: {risk_tolerance.upper()}")
+            modify = input("  Change this? (yes/no): ").strip().lower()
+            if modify in ["yes", "y"]:
+                risk_tolerance = collect_risk_tolerance()
+        
+        # Final Confirmation
         if confirm_preferences(goals, sectors, risk_tolerance):
             print("\n" + "="*80)
             print("Starting research analysis...")
