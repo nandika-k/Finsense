@@ -181,6 +181,55 @@ JSON object:"""
         return {"goals": None, "sectors": None, "risk_tolerance": None}
 
 
+def detect_user_intent(client: Any, user_input: str, context: str) -> str:
+    """
+    Lightweight LLM-based intent classification.
+    
+    Args:
+        client: Groq client
+        user_input: User's input text
+        context: What they're responding to (goals, sectors, risk)
+    
+    Returns:
+        One of: "delegate", "specify", "help", "unclear"
+    """
+    if not client:
+        return "unclear"
+    
+    try:
+        prompt = f"""Classify the user's intent in this conversation about {context}.
+
+User input: "{user_input}"
+
+Classify as ONE of these intents:
+- "delegate": User wants you to decide/choose for them (e.g., "you pick", "whatever's best", "up to you", "you decide", "recommend something")
+- "specify": User is specifying their own preferences (e.g., "tech and healthcare", "growth", "low risk")
+- "help": User wants to see options/ideas (e.g., "what are my options", "show me", "help", "ideas")
+- "unclear": Cannot determine intent
+
+Return ONLY the intent word, nothing else."""
+
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=10
+        )
+        
+        intent = response.choices[0].message.content.strip().lower()
+        
+        # Validate response
+        if intent in ["delegate", "specify", "help", "unclear"]:
+            return intent
+        
+        return "unclear"
+        
+    except Exception as e:
+        if os.getenv("DEBUG_CHATBOT"):
+            print(f"[DEBUG] Intent detection error: {e}")
+        return "unclear"
+
+
 def get_llm_client() -> Optional[Any]:
     """Get Groq client if API key is available"""
     if not HAS_GROQ:
