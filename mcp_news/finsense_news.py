@@ -601,7 +601,9 @@ def fetch_headlines_from_rss(sector: str, days: int, max_results: int = 20) -> L
     log(f"Companies: {keywords.get('companies', [])[:5]}")
     
     rss_feeds = get_sector_rss_feeds(sector)
-    log(f"Will attempt {len(rss_feeds)} RSS feeds")
+    # Limit to first 4 feeds to prevent timeout (primary + sector-specific feeds only)
+    rss_feeds = rss_feeds[:4]
+    log(f"Will attempt {len(rss_feeds)} RSS feeds (limited for performance)")
     
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -617,7 +619,7 @@ def fetch_headlines_from_rss(sector: str, days: int, max_results: int = 20) -> L
         
         try:
             log(f"Fetching from: {feed_url}")
-            response = requests.get(feed_url, timeout=10, headers=headers)
+            response = requests.get(feed_url, timeout=5, headers=headers)  # Reduced timeout to 5s
             
             if response.status_code != 200:
                 log(f"⚠ Failed to fetch {feed_url}: HTTP {response.status_code}")
