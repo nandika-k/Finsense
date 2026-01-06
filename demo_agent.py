@@ -4,7 +4,8 @@ Demo script with interactive chatbot for collecting user preferences.
 
 import asyncio
 from agent.agent import FinsenseCoordinator
-from ui.chatbot import run_chatbot
+from ui.chatbot import run_chatbot, INVESTMENT_GOALS
+from ui.summary_generator import generate_sector_goal_summary, generate_risk_summary_with_citations
 
 
 def display_user_preferences(preferences: dict):
@@ -15,7 +16,6 @@ def display_user_preferences(preferences: dict):
     
     goals = preferences.get("goals", [])
     if goals:
-        from ui.chatbot import INVESTMENT_GOALS
         goal_names = [INVESTMENT_GOALS[g]["name"] for g in goals]
         print(f"\nInvestment Goals: {', '.join(goal_names)}")
     else:
@@ -225,6 +225,21 @@ async def main():
         
         # Display findings
         display_research_findings(research)
+        
+        # Generate AI summaries based on research data
+        print("\n" + "="*80)
+        print("AI-GENERATED INSIGHTS (Based on Research Data)")
+        print("="*80)
+        
+        print("\n[SECTOR-GOAL ALIGNMENT]")
+        print("-" * 80)
+        sector_summary = generate_sector_goal_summary(research, preferences)
+        print(f"  {sector_summary}")
+        
+        print("\n[KEY RISKS & NEWS CITATIONS]")
+        print("-" * 80)
+        risk_summary = generate_risk_summary_with_citations(research)
+        print(f"  {risk_summary}")
         
         print("\n" + "="*80)
         print("ANALYSIS COMPLETE")
