@@ -107,16 +107,20 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         
         try:
             ticker = yf.Ticker(ticker_symbol)
-            hist = ticker.history(period="1mo")
+            hist = ticker.history(period="1y")  # Get full year for 3m and 1y calculations
             
             if len(hist) > 0:
                 current_price = hist['Close'].iloc[-1]
                 price_1w_ago = hist['Close'].iloc[-5] if len(hist) >= 5 else hist['Close'].iloc[0]
-                price_1m_ago = hist['Close'].iloc[0]
+                price_1m_ago = hist['Close'].iloc[-21] if len(hist) >= 21 else hist['Close'].iloc[0]
+                price_3m_ago = hist['Close'].iloc[-63] if len(hist) >= 63 else hist['Close'].iloc[0]
+                price_1y_ago = hist['Close'].iloc[0]
                 
                 perf_1d = ((current_price - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2] * 100) if len(hist) > 1 else 0
                 perf_1w = ((current_price - price_1w_ago) / price_1w_ago * 100) if price_1w_ago > 0 else 0
                 perf_1m = ((current_price - price_1m_ago) / price_1m_ago * 100) if price_1m_ago > 0 else 0
+                perf_3m = ((current_price - price_3m_ago) / price_3m_ago * 100) if price_3m_ago > 0 else 0
+                perf_1y = ((current_price - price_1y_ago) / price_1y_ago * 100) if price_1y_ago > 0 else 0
                 
                 # Get top performers from sector companies
                 top_performers = []
@@ -147,6 +151,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "performance_1d": f"{perf_1d:+.2f}%",
                     "performance_1w": f"{perf_1w:+.2f}%",
                     "performance_1m": f"{perf_1m:+.2f}%",
+                    "performance_3m": f"{perf_3m:+.2f}%",
+                    "performance_1y": f"{perf_1y:+.2f}%",
                     "current_price": round(current_price, 2),
                     "market_cap": f"{ticker.info.get('marketCap', 'N/A'):,}" if isinstance(ticker.info.get('marketCap'), (int, float)) else "N/A",
                     "market_weight": market_weight,
