@@ -6,6 +6,7 @@ import sys
 import os
 import json
 import requests
+from requests.exceptions import Timeout, ConnectionError, RequestException
 from datetime import datetime, timedelta
 from typing import Dict, List
 import re
@@ -619,6 +620,7 @@ def fetch_headlines_from_rss(sector: str, days: int, max_results: int = 20) -> L
         
         try:
             log(f"Fetching from: {feed_url}")
+            # Handle network timeouts and connection errors explicitly
             response = requests.get(feed_url, timeout=5, headers=headers)  # Reduced timeout to 5s
             
             if response.status_code != 200:
@@ -626,10 +628,12 @@ def fetch_headlines_from_rss(sector: str, days: int, max_results: int = 20) -> L
                 failed_feeds += 1
                 continue
             
-            # Try XML parser first, fall back to HTML parser
+            # Try XML parser first (requires lxml), fall back to HTML parser if not available
             try:
                 soup = BeautifulSoup(response.content, 'xml')
-            except:
+            except Exception as parse_err:
+                # XML parser may fail if lxml not installed or content is malformed
+                log(f"XML parser failed for {feed_url}, falling back to HTML parser: {parse_err}")
                 soup = BeautifulSoup(response.content, 'html.parser')
             
             items = soup.find_all('item')
@@ -703,10 +707,26 @@ def fetch_headlines_from_rss(sector: str, days: int, max_results: int = 20) -> L
                     })
                     log(f"Added ({sentiment_analysis['sentiment']}/{sentiment_analysis['confidence']}): {title_text[:60]}... (score: {relevance_score})")
                     
+        # Handle specific network and parsing errors with detailed logging
+        except Timeout:
+            log(f"⏱ Timeout after 5s fetching {feed_url}")
+            failed_feeds += 1
+            continue
+        except ConnectionError as conn_err:
+            log(f"🔌 Connection error for {feed_url}: {conn_err}")
+            failed_feeds += 1
+            continue
+        except RequestException as req_err:
+            log(f"⚠ Request failed for {feed_url}: {req_err}")
+            failed_feeds += 1
+            continue
         except Exception as e:
-            log(f"Error parsing {feed_url}: {e}")
+            log(f"❌ Unexpected error parsing {feed_url}: {type(e).__name__} - {e}")
+            failed_feeds += 1
             continue
     
+    # Log feed statistics for debugging
+    log(f"Feed Summary: {successful_feeds} successful, {failed_feeds} failed out of {len(rss_feeds)} total")
     log(f"Total headlines collected: {len(headlines)}")
     
     # Remove duplicates and sort by relevance
