@@ -29,18 +29,18 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 20px;
+    padding: 0;
     color: var(--dark-green);
 }
 
 .container {
-    width: 100%;
-    max-width: 900px;
-    height: 90vh;
+    width: 80%;
+    max-width: 80%;
+    height: 100vh;
     display: flex;
     flex-direction: column;
     background: var(--white);
-    border-radius: 20px;
+    border-radius: 0;
     box-shadow: 0 20px 60px var(--shadow-strong);
     overflow: hidden;
 }
