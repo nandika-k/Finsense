@@ -181,17 +181,18 @@ Instructions:
         
         # Add article citations at the end with better formatting
         if article_citations:
-            summary += "\n\n📰 Related News Articles:"
+            summary += "\n\n📰 Related News Articles:\n"
             article_count = 0
             for sector, articles in list(article_citations.items())[:3]:  # Max 3 sectors
                 for article in articles[:3]:  # Max 3 articles per sector
                     if article_count >= 8:  # Limit total articles to 8
                         break
-                    summary += f"\n\n  [{sector.upper()}] {article['title']}"
+                    summary += f"[{sector.upper()}] {article['title']}"
                     if article.get('related_risk'):
-                        summary += f"\n  Risk: {article['related_risk']}"
+                        summary += f" Risk: {article['related_risk']}"
                     if article.get('source'):
                         summary += f"\n  Source: {article['source']}"
+                    summary += "\n "  # Add space and newline for separation
                     article_count += 1
                 if article_count >= 8:
                     break
