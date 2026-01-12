@@ -5,6 +5,8 @@ Finsense helps users make sense of market uncertainty by combining live market d
 
 The system is built around an AI agent that reasons about information, supported by modular MCP servers that provide reliable data and analytics.
 
+Check it out: https://finsense-web.vercel.app/
+
 ## MCP Servers
 ### mcp_market
 Processes market data to understand sector and stock performance. It provides historical returns, price summaries, and basic trend information that ground the system’s insights in real market behavior.
@@ -13,4 +15,5 @@ Processes market data to understand sector and stock performance. It provides hi
 Retrieves relevant news headlines and extracts risk-related themes from unstructured text. It maps these themes to affected sectors, helping translate real-world events into market context.
 
 ### mcp_risk
+
 Analyzes inter-sector relationships, correlations, and volatility. It helps identify how risk can spread across the market and highlights areas that may be more sensitive during periods of stress.
