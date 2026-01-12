@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Finsense - Financial Intelligence Assistant</title>
+    <link rel="stylesheet" href="chatbot_styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <h1>Finsense</h1>
+                <p class="tagline">Build wealth with intelligence</p>
+            </div>
+        </header>
+
+        <!-- Chat Container -->
+        <div class="chat-container">
+            <div class="chat-header">
+                <div class="chat-status">
+                    <span class="status-indicator"></span>
+                    <span class="status-text">AI Assistant Ready</span>
+                </div>
+            </div>
+
+            <!-- Messages Area -->
+            <div class="messages-area" id="messagesArea">
+                <!-- Welcome Message -->
+                <div class="message bot-message">
+                    <div class="message-avatar">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                            <path d="M2 17l10 5 10-5"/>
+                            <path d="M2 12l10 5 10-5"/>
+                        </svg>
+                    </div>
+                    <div class="message-content">
+                        <p>Welcome to Finsense! I'm here to help you explore financial markets, analyze risks, and stay updated with market news.</p>
+                        <p>How can I assist you today?</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Input Area -->
+            <div class="input-area">
+                <div class="input-container">
+                    <textarea 
+                        id="userInput" 
+                        class="user-input" 
+                        placeholder="Ask me anything about markets, stocks, or financial news..."
+                        rows="1"
+                    ></textarea>
+                    <button class="send-button" id="sendButton">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer with Disclaimer -->
+        <footer class="footer">
+            <div class="disclaimer">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+                <strong>Important:</strong> Finsense does not provide investment advice.
+            </div>
+            <div class="footer-text">
+                All information provided is for educational and informational purposes only.
+            </div>
+        </footer>
+    </div>
+
+    <script src="chatbot_script.js"></script>
+</body>
+</html>
