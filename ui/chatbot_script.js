@@ -1,6 +1,6 @@
 // Chatbot UI Script with FastAPI Backend Integration
 
-const API_BASE_URL = 'http://localhost:8000';  // Change for production
+const API_BASE_URL = 'https://your-backend-url.comhttps://finsense-ktp7.onrender.com'; 
 
 class ChatbotUI {
     constructor() {
