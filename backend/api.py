@@ -410,16 +410,20 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
 
 def get_welcome_message() -> str:
     """Get initial welcome message"""
-    return """Welcome to Finsense! I'll help you explore financial markets, analyze risks, and stay updated with market news.
+    return """Welcome! I'll help you identify sectors and stocks worth researching based on your investment goals and risk tolerance.
+
+Let's start by understanding your investment preferences...
+
+**TELL ME ABOUT YOUR INVESTMENT INTERESTS**
 
 You can tell me everything at once, or we'll go step-by-step.
 
 **Examples:**
 • "I want growth in technology with medium risk"
-• "ESG investing in healthcare and energy sectors"
+• "ESG investing in healthcare and energy sectors"  
 • "Low risk defensive strategy"
-
-**Or just press Enter to be guided through each question.**
+• Type "ideas" or "help" to see available goal options
+• Just press Enter to go through each question
 
 What are you looking for?"""
 
