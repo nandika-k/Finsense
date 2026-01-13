@@ -828,8 +828,7 @@ def run_chatbot() -> Optional[Dict]:
         print("  • 'I want growth in technology with medium risk'")
         print("  • 'ESG investing in healthcare and energy sectors'")
         print("  • 'Low risk defensive strategy'")
-        print("  • Type 'ideas' or 'help' to see available goal options")
-        print("  • Just press Enter to go through each question\n")
+        print("  • Type 'ideas' or 'help' to see available goal options\n")
         
         initial_input = input("What are you looking for? ").strip()
         
