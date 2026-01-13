@@ -13,6 +13,20 @@ class ChatbotUI {
         
         this.initializeEventListeners();
         this.adjustTextareaHeight();
+        this.loadWelcomeMessage();
+    }
+    
+    async loadWelcomeMessage() {
+        try {
+            // Send empty message to get welcome
+            const response = await this.sendChatMessage('');
+            this.sessionId = response.session_id;
+            this.currentState = response.state;
+            this.addBotMessage(response.bot_message);
+        } catch (error) {
+            // Fallback welcome message if API fails
+            this.addBotMessage('Welcome! Unable to connect to server. Please check your connection and try again.');
+        }
     }
 
     initializeEventListeners() {
