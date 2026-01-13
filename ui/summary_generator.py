@@ -202,3 +202,66 @@ Instructions:
     
     except Exception as e:
         return f"[Error generating risk summary: {e}]"
+
+
+def generate_stock_picks_summary(research_data: Dict[str, Any]) -> str:
+    """
+    Generate a summary of stock recommendations with explanations.
+    Only references stocks that were actually recommended.
+    """
+    client = get_groq_client()
+    if not client:
+        return "[LLM stock summary unavailable - set GROQ_API_KEY to enable]"
+    
+    # Extract stock recommendations
+    stock_recs = research_data.get("stock_recommendations", {})
+    
+    if not stock_recs or "error" in stock_recs:
+        return ""
+    
+    # Build context for LLM
+    stock_summary = {}
+    for goal, data in stock_recs.items():
+        if isinstance(data, dict) and "stocks" in data:
+            stocks = data.get("stocks", [])
+            if stocks:
+                stock_summary[goal] = []
+                for stock in stocks[:3]:  # Top 3 per goal
+                    stock_summary[goal].append({
+                        "ticker": stock.get("ticker"),
+                        "name": stock.get("name"),
+                        "price": stock.get("price"),
+                        "performance_1m": stock.get("performance_1m"),
+                        "volatility": stock.get("volatility"),
+                        "dividend_yield": stock.get("dividend_yield"),
+                        "esg_score": stock.get("esg_score"),
+                        "reasons": stock.get("reasons", [])
+                    })
+    
+    if not stock_summary:
+        return ""
+    
+    prompt = f"""Based ONLY on the following stock recommendations data, write a brief 2-3 sentence summary explaining why these stocks were recommended for the specified investment goals.
+
+STOCK RECOMMENDATIONS BY GOAL:
+{json.dumps(stock_summary, indent=2)}
+
+Instructions:
+- Mention the investment goals (ESG, income, growth) and how the stocks align
+- Reference specific stocks by ticker and their key strengths
+- Keep it factual and concise (2-3 sentences)
+- Do NOT invent information not present in the data"""
+
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=200
+        )
+        
+        return response.choices[0].message.content.strip()
+    
+    except Exception as e:
+        return f"[Error generating stock summary: {e}]"
+

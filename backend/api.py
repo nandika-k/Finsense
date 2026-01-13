@@ -32,7 +32,8 @@ from ui.chatbot import (
 )
 from ui.summary_generator import (
     generate_sector_goal_summary,
-    generate_risk_summary_with_citations
+    generate_risk_summary_with_citations,
+    generate_stock_picks_summary
 )
 
 load_dotenv()
@@ -680,6 +681,11 @@ def format_research_results(research_data: Dict, preferences: Dict) -> str:
     
     risk_summary = generate_risk_summary_with_citations(research_data)
     html += f"<div class='ai-summary'><h4>Key Risks & News Citations</h4><p>{risk_summary}</p></div>"
+    
+    # Add stock picks summary if available
+    stock_summary = generate_stock_picks_summary(research_data)
+    if stock_summary:
+        html += f"<div class='ai-summary'><h4>Stock Recommendations Explained</h4><p>{stock_summary}</p></div>"
     
     html += "</div>"
     
