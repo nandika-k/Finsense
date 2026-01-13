@@ -272,6 +272,27 @@ class FinsenseCoordinator:
         summary = json.loads(content)
         return summary
 
+    async def get_stock_recommendations(self, sector: str, goal: str) -> Dict[str, Any]:
+        """Get stock recommendations for a sector based on investment goal"""
+        result = await self.market_client.call_tool("get_stock_recommendations", {
+            "sector": sector,
+            "goal": goal
+        })
+        content = result["content"][0]["text"]
+        import json
+        recommendations = json.loads(content)
+        return recommendations
+
+    async def get_stock_details(self, ticker: str) -> Dict[str, Any]:
+        """Get detailed information for a specific stock"""
+        result = await self.market_client.call_tool("get_stock_details", {
+            "ticker": ticker
+        })
+        content = result["content"][0]["text"]
+        import json
+        details = json.loads(content)
+        return details
+
     #risk tools
     async def compute_sector_volatility(self, sector: str, timeframe: str) -> Dict[str, Any]:
         """Compute volatility for a sector"""
@@ -500,14 +521,34 @@ class FinsenseCoordinator:
 
         # 4. Apply goal-based filtering and recommendations
         if investment_goals:
-            logger.info("\n[4/4] Applying goal-based filtering...")
+            logger.info("\n[4/5] Applying goal-based sector filtering...")
             research_data["goal_based_recommendations"] = self._filter_by_goals(
                 research_data["sector_deep_dives"],
                 investment_goals,
                 risk_tolerance
             )
-            logger.info("✓ Generated %d goal-aligned recommendations", 
+            logger.info("✓ Generated %d goal-aligned sector recommendations", 
                        len(research_data["goal_based_recommendations"].get("ranked_sectors", [])))
+            
+            # 5. Get stock recommendations for specific goals
+            stock_goals = [g for g in investment_goals if g in ["esg", "income", "growth"]]
+            if stock_goals:
+                logger.info("\n[5/5] Finding stock recommendations for goals: %s", ", ".join(stock_goals))
+                top_sector_names = [s["sector"] for s in research_data["goal_based_recommendations"].get("top_picks", [])[:3]]
+                try:
+                    async with asyncio.timeout(45.0):
+                        stock_recs = await self._recommend_stocks_for_goals(stock_goals, top_sector_names)
+                        research_data["stock_recommendations"] = stock_recs
+                        total_stocks = sum(len(v.get("stocks", [])) for v in stock_recs.values())
+                        logger.info("✓ Found %d stock recommendations across %d goals", total_stocks, len(stock_recs))
+                except asyncio.TimeoutError:
+                    logger.warning("✗ Stock recommendations timed out after 45s")
+                    research_data["stock_recommendations"] = {"error": "timeout"}
+                except Exception as e:
+                    logger.warning("✗ Stock recommendations failed: %s", str(e)[:100])
+                    research_data["stock_recommendations"] = {"error": str(e)}
+            else:
+                logger.info("\n[5/5] Skipping stock recommendations (no applicable goals)")
 
         # Add execution summary
         success_rate = (stats["successful_operations"] / stats["total_operations"] * 100) if stats["total_operations"] > 0 else 0
@@ -700,6 +741,124 @@ class FinsenseCoordinator:
             "top_picks": top_picks,
             "goals_applied": goals,
             "risk_tolerance": risk_tolerance,
+            "summary": f"Based on your {', '.join(goals)} goals, we've identified {len(top_picks)} sectors worth researching."
+        }
+
+    async def _recommend_stocks_for_goals(self, goals: List[str], top_sectors: List[str]) -> Dict[str, Any]:
+        """
+        Recommend individual stocks based on investment goals.
+        
+        Args:
+            goals: List of investment goals (growth, income, esg, etc.)
+            top_sectors: List of top-ranked sectors to search within
+            
+        Returns:
+            Dict with stock recommendations per goal
+        """
+        stock_recommendations = {}
+        
+        # Map goals to search criteria
+        goal_search = {
+            "esg": ["technology", "healthcare", "utilities"],
+            "income": ["utilities", "consumer", "financial-services"],
+            "growth": ["technology", "healthcare", "communications"]
+        }
+        
+        for goal in goals:
+            if goal not in goal_search:
+                continue
+            
+            # Use intersection of goal's preferred sectors and top sectors
+            sectors_to_search = goal_search.get(goal, [])
+            if top_sectors:
+                # Prefer top sectors, but fallback to goal defaults
+                search_sectors = [s for s in top_sectors if s in sectors_to_search] or sectors_to_search[:2]
+            else:
+                search_sectors = sectors_to_search[:2]
+            
+            all_stocks = []
+            for sector in search_sectors[:2]:  # Limit to 2 sectors per goal
+                try:
+                    stock_data = await self.get_stock_recommendations(sector, goal)
+                    if "error" not in stock_data and "stocks" in stock_data:
+                        all_stocks.extend(stock_data["stocks"])
+                except Exception as e:
+                    logger.warning(f"Failed to get stock recommendations for {sector}/{goal}: {e}")
+                    continue
+            
+            # Score and filter stocks
+            scored_stocks = []
+            for stock in all_stocks:
+                score = 0
+                reasons = []
+                
+                # Parse metrics
+                try:
+                    perf_1m = float(stock.get("performance_1m", "0").rstrip("%"))
+                    volatility = float(stock.get("volatility", "0").rstrip("%"))
+                    div_yield = float(stock.get("dividend_yield", 0))
+                    esg_score = float(stock.get("esg_score", 0))
+                except:
+                    continue
+                
+                # Goal-based scoring
+                if goal == "esg":
+                    if esg_score > 50:
+                        score += 40
+                        reasons.append(f"Strong ESG score ({esg_score:.0f})")
+                    elif esg_score > 30:
+                        score += 20
+                        reasons.append(f"Good ESG score ({esg_score:.0f})")
+                    if volatility < 25:
+                        score += 10
+                        reasons.append("Low volatility")
+                
+                elif goal == "income":
+                    if div_yield > 3:
+                        score += 40
+                        reasons.append(f"High dividend yield ({div_yield:.2f}%)")
+                    elif div_yield > 2:
+                        score += 20
+                        reasons.append(f"Good dividend yield ({div_yield:.2f}%)")
+                    if volatility < 20:
+                        score += 10
+                        reasons.append("Stable performance")
+                
+                elif goal == "growth":
+                    if perf_1m > 5:
+                        score += 40
+                        reasons.append(f"Strong 1M performance ({perf_1m:+.1f}%)")
+                    elif perf_1m > 0:
+                        score += 20
+                        reasons.append(f"Positive momentum ({perf_1m:+.1f}%)")
+                    if volatility < 35:
+                        score += 10
+                
+                if score > 0:
+                    scored_stocks.append({
+                        "ticker": stock["ticker"],
+                        "name": stock["name"],
+                        "price": stock["price"],
+                        "performance_1m": stock["performance_1m"],
+                        "volatility": stock["volatility"],
+                        "dividend_yield": f"{div_yield:.2f}%" if div_yield > 0 else "N/A",
+                        "esg_score": esg_score if esg_score > 0 else "N/A",
+                        "score": score,
+                        "reasons": reasons
+                    })
+            
+            # Sort by score and take top 5
+            scored_stocks.sort(key=lambda x: x["score"], reverse=True)
+            top_stocks = scored_stocks[:5]
+            
+            if top_stocks:
+                stock_recommendations[goal] = {
+                    "goal": goal,
+                    "stocks": top_stocks,
+                    "summary": f"Top {len(top_stocks)} stocks for {goal} based on current market data"
+                }
+        
+        return stock_recommendations
             "summary": f"Identified {len(ranked_sectors)} sectors aligned with your goals"
         }
 

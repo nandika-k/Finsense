@@ -80,33 +80,33 @@ RISK_TOLERANCE_LEVELS = ["low", "medium", "high"]
 
 def parse_initial_query(user_input: str) -> Dict[str, Any]:
     """
-    Parse an initial open-ended query for goals, sectors, and risk tolerance.
+    Parse an initial open-ended query for goals, sectors, and risk tolerance using LLM.
     
     Returns dict with:
         - goals: List[str] or None
-        - sectors: List[str] or None
+        - sectors: List[str] or None  
         - risk_tolerance: str or None
+        - needs_clarification: bool
+        - clarification_message: str (if needs clarification)
+        - confidence: str (high, medium, low)
     """
     llm_client = get_llm_client()
     
     if not llm_client:
-        # Fallback: basic keyword matching without LLM
-        result = {"goals": None, "sectors": None, "risk_tolerance": None}
-        
-        # Check for risk tolerance keywords
-        user_lower = user_input.lower()
-        if any(word in user_lower for word in ["low risk", "conservative", "safe", "stable"]):
-            result["risk_tolerance"] = "low"
-        elif any(word in user_lower for word in ["high risk", "aggressive", "growth"]):
-            result["risk_tolerance"] = "high"
-        elif any(word in user_lower for word in ["medium risk", "moderate", "balanced"]):
-            result["risk_tolerance"] = "medium"
-        
-        return result
+        # Fallback: return needs clarification
+        return {
+            "goals": None, 
+            "sectors": None, 
+            "risk_tolerance": None,
+            "needs_clarification": True,
+            "clarification_message": "I'd be happy to help! Could you tell me about your investment goals, preferred sectors, or risk tolerance?",
+            "confidence": "low"
+        }
     
-    # Use LLM for comprehensive parsing
+    # Use LLM for comprehensive parsing with confidence assessment
     try:
         prompt = f"""Parse this investment query and extract investment goals, sectors, and risk tolerance.
+Assess your confidence in the interpretation and determine if clarification is needed.
 
 AVAILABLE INVESTMENT GOALS: {', '.join(INVESTMENT_GOALS.keys())}
 AVAILABLE SECTORS: {', '.join(AVAILABLE_SECTORS)}
@@ -114,30 +114,48 @@ RISK TOLERANCE LEVELS: low, medium, high
 
 User query: "{user_input}"
 
-Extract and return ONLY a JSON object with these fields (use null if not mentioned):
+Analyze the query and return ONLY a JSON object with these fields:
 {{
-  "goals": [list of goal keys that match the query, or null],
-  "sectors": [list of sector names that match the query, or null],
-  "risk_tolerance": "low" or "medium" or "high" or null
+  "goals": [list of goal keys that match, or null if unclear/not mentioned],
+  "sectors": [list of sector names that match, or null if unclear/not mentioned],
+  "risk_tolerance": "low" or "medium" or "high" or null if unclear/not mentioned,
+  "confidence": "high" or "medium" or "low",
+  "needs_clarification": true or false,
+  "clarification_message": "what specifically needs clarification, if needs_clarification is true"
 }}
 
+Guidelines:
+- Set confidence to "high" only if the user's intent is very clear
+- Set confidence to "medium" if there's some ambiguity but you can make reasonable assumptions
+- Set confidence to "low" if the query is vague or could mean multiple things
+- Set needs_clarification to true if confidence is low OR if critical information is ambiguous
+- Be generous in interpretation - if user says "tech stocks" assume sectors: ["technology"]
+- If user says general things like "help me invest" or "what should I do", set needs_clarification to true
+
 Examples:
+
 Query: "I want growth in tech and healthcare with low risk"
-Result: {{"goals": ["growth"], "sectors": ["technology", "healthcare"], "risk_tolerance": "low"}}
+Result: {{"goals": ["growth"], "sectors": ["technology", "healthcare"], "risk_tolerance": "low", "confidence": "high", "needs_clarification": false, "clarification_message": null}}
 
-Query: "ESG investing"
-Result: {{"goals": ["esg"], "sectors": null, "risk_tolerance": null}}
+Query: "ESG investing in energy"  
+Result: {{"goals": ["esg"], "sectors": ["energy"], "risk_tolerance": null, "confidence": "high", "needs_clarification": false, "clarification_message": null}}
 
-Query: "Analyze everything"
-Result: {{"goals": null, "sectors": null, "risk_tolerance": null}}
+Query: "I want safe investments"
+Result: {{"goals": null, "sectors": null, "risk_tolerance": "low", "confidence": "medium", "needs_clarification": true, "clarification_message": "I understand you want safe investments. Which sectors interest you most? (technology, healthcare, finance, etc.)"}}
+
+Query: "help me"
+Result: {{"goals": null, "sectors": null, "risk_tolerance": null, "confidence": "low", "needs_clarification": true, "clarification_message": "I'd be happy to help! Are you looking for growth, income, ESG investing, or something else?"}}
+
+Query: "ideas"
+Result: {{"goals": null, "sectors": null, "risk_tolerance": null, "confidence": "high", "needs_clarification": false, "clarification_message": null}}
 
 JSON object:"""
 
         response = llm_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-            max_tokens=300
+            temperature=0.1,
+            max_tokens=400
         )
         
         content = response.choices[0].message.content.strip()
@@ -156,7 +174,10 @@ JSON object:"""
         result = {
             "goals": None,
             "sectors": None,
-            "risk_tolerance": None
+            "risk_tolerance": None,
+            "needs_clarification": parsed.get("needs_clarification", False),
+            "clarification_message": parsed.get("clarification_message"),
+            "confidence": parsed.get("confidence", "medium")
         }
         
         # Validate goals
@@ -178,7 +199,14 @@ JSON object:"""
     except Exception as e:
         if os.getenv("DEBUG_CHATBOT"):
             print(f"[DEBUG] LLM parsing error: {e}")
-        return {"goals": None, "sectors": None, "risk_tolerance": None}
+        return {
+            "goals": None, 
+            "sectors": None, 
+            "risk_tolerance": None,
+            "needs_clarification": True,
+            "clarification_message": "I didn't quite catch that. Could you tell me more about what you're looking for?",
+            "confidence": "low"
+        }
 
 
 def detect_user_intent(client: Any, user_input: str, context: str) -> str:

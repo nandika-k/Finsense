@@ -65,6 +65,29 @@ async def list_tools() -> list[Tool]:
                 "properties": {},
                 "required": []
             }
+        ),
+        Tool(
+            name="get_stock_recommendations",
+            description="Get recommended stocks for a sector based on investment goal (esg, income, growth)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sector": {"type": "string", "description": "Sector name (e.g., technology, healthcare)"},
+                    "goal": {"type": "string", "description": "Investment goal: esg, income, or growth"}
+                },
+                "required": ["sector", "goal"]
+            }
+        ),
+        Tool(
+            name="get_stock_details",
+            description="Get detailed information for a specific stock including fundamentals and ESG data",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ticker": {"type": "string", "description": "Stock ticker symbol (e.g., AAPL, MSFT)"}
+                },
+                "required": ["ticker"]
+            }
         )
     ]
 
@@ -231,6 +254,127 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             log(f"Error fetching market indices: {e}")
         
         return [TextContent(type="text", text=json.dumps(indices, default=str))]
+    
+    elif name == "get_stock_recommendations":
+        sector = arguments.get("sector", "").lower()
+        goal = arguments.get("goal", "").lower()
+        
+        # Map sectors to top companies
+        sector_stocks = {
+            "technology": ["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AVGO", "ADBE", "CRM"],
+            "healthcare": ["JNJ", "UNH", "LLY", "ABBV", "MRK", "TMO", "ABT", "DHR"],
+            "financial-services": ["JPM", "BAC", "WFC", "GS", "MS", "C", "BLK", "SCHW"],
+            "energy": ["XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO"],
+            "consumer": ["AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "TJX", "LOW"],
+            "industrials": ["BA", "CAT", "GE", "HON", "UNP", "RTX", "LMT", "DE"],
+            "materials": ["LIN", "APD", "SHW", "FCX", "NEM", "ECL", "DD", "NUE"],
+            "real-estate": ["AMT", "PLD", "CCI", "EQIX", "SPG", "PSA", "O", "WELL"],
+            "utilities": ["NEE", "DUK", "SO", "D", "AEP", "EXC", "SRE", "XEL"],
+            "communications": ["META", "GOOGL", "NFLX", "DIS", "CMCSA", "VZ", "T", "TMUS"]
+        }
+        
+        stock_list = sector_stocks.get(sector, [])
+        if not stock_list:
+            return [TextContent(type="text", text=json.dumps({"error": f"Unknown sector: {sector}"}, default=str))]
+        
+        recommendations = []
+        try:
+            for ticker_symbol in stock_list[:8]:  # Limit to 8 stocks
+                try:
+                    tick = yf.Ticker(ticker_symbol)
+                    info = tick.info
+                    hist = tick.history(period="3mo")
+                    
+                    if len(hist) < 5:
+                        continue
+                    
+                    current_price = hist['Close'].iloc[-1]
+                    price_1m_ago = hist['Close'].iloc[-21] if len(hist) >= 21 else hist['Close'].iloc[0]
+                    perf_1m = ((current_price - price_1m_ago) / price_1m_ago * 100) if price_1m_ago > 0 else 0
+                    
+                    # Calculate volatility
+                    returns = hist['Close'].pct_change().dropna()
+                    volatility = returns.std() * (252 ** 0.5) * 100 if len(returns) > 0 else 0
+                    
+                    stock_data = {
+                        "ticker": ticker_symbol,
+                        "name": info.get("shortName", ticker_symbol),
+                        "price": round(current_price, 2),
+                        "performance_1m": f"{perf_1m:+.2f}%",
+                        "volatility": f"{volatility:.2f}%",
+                        "market_cap": info.get("marketCap", 0),
+                        "dividend_yield": info.get("dividendYield", 0) * 100 if info.get("dividendYield") else 0,
+                        "pe_ratio": info.get("trailingPE", 0),
+                        "esg_score": info.get("esgScores", {}).get("totalEsg", 0) if isinstance(info.get("esgScores"), dict) else 0
+                    }
+                    recommendations.append(stock_data)
+                except Exception as e:
+                    log(f"Error fetching {ticker_symbol}: {e}")
+                    continue
+            
+            # Sort by goal criteria
+            if goal == "esg":
+                recommendations.sort(key=lambda x: (x["esg_score"], -x.get("volatility", 100)), reverse=True)
+            elif goal == "income":
+                recommendations.sort(key=lambda x: x["dividend_yield"], reverse=True)
+            elif goal == "growth":
+                recommendations.sort(key=lambda x: float(x["performance_1m"].rstrip("%")), reverse=True)
+            
+            result = {
+                "sector": sector,
+                "goal": goal,
+                "stocks": recommendations[:5]  # Return top 5
+            }
+        except Exception as e:
+            log(f"Error in get_stock_recommendations: {e}")
+            result = {"error": str(e)}
+        
+        return [TextContent(type="text", text=json.dumps(result, default=str))]
+    
+    elif name == "get_stock_details":
+        ticker = arguments.get("ticker", "").upper()
+        try:
+            tick = yf.Ticker(ticker)
+            info = tick.info
+            hist = tick.history(period="1y")
+            
+            if len(hist) > 0:
+                current_price = hist['Close'].iloc[-1]
+                price_1m_ago = hist['Close'].iloc[-21] if len(hist) >= 21 else hist['Close'].iloc[0]
+                price_3m_ago = hist['Close'].iloc[-63] if len(hist) >= 63 else hist['Close'].iloc[0]
+                price_1y_ago = hist['Close'].iloc[0]
+                
+                perf_1m = ((current_price - price_1m_ago) / price_1m_ago * 100) if price_1m_ago > 0 else 0
+                perf_3m = ((current_price - price_3m_ago) / price_3m_ago * 100) if price_3m_ago > 0 else 0
+                perf_1y = ((current_price - price_1y_ago) / price_1y_ago * 100) if price_1y_ago > 0 else 0
+                
+                returns = hist['Close'].pct_change().dropna()
+                volatility = returns.std() * (252 ** 0.5) * 100 if len(returns) > 0 else 0
+                
+                stock_details = {
+                    "ticker": ticker,
+                    "name": info.get("shortName", ticker),
+                    "sector": info.get("sector", "N/A"),
+                    "industry": info.get("industry", "N/A"),
+                    "price": round(current_price, 2),
+                    "performance_1m": f"{perf_1m:+.2f}%",
+                    "performance_3m": f"{perf_3m:+.2f}%",
+                    "performance_1y": f"{perf_1y:+.2f}%",
+                    "volatility": f"{volatility:.2f}%",
+                    "market_cap": info.get("marketCap", "N/A"),
+                    "pe_ratio": round(info.get("trailingPE", 0), 2) if info.get("trailingPE") else "N/A",
+                    "dividend_yield": f"{info.get('dividendYield', 0) * 100:.2f}%" if info.get("dividendYield") else "N/A",
+                    "52w_high": round(info.get("fiftyTwoWeekHigh", 0), 2) if info.get("fiftyTwoWeekHigh") else "N/A",
+                    "52w_low": round(info.get("fiftyTwoWeekLow", 0), 2) if info.get("fiftyTwoWeekLow") else "N/A",
+                    "description": info.get("longBusinessSummary", "No description available")[:200]
+                }
+            else:
+                stock_details = {"ticker": ticker, "error": "No data available"}
+        except Exception as e:
+            log(f"Error fetching stock details: {e}")
+            stock_details = {"ticker": ticker, "error": str(e)}
+        
+        return [TextContent(type="text", text=json.dumps(stock_details, default=str))]
     
     else:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]

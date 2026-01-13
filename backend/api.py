@@ -120,6 +120,15 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
         if user_input.strip():
             parsed = parse_initial_query(user_input)
             
+            # Check if LLM needs clarification
+            if parsed.get("needs_clarification"):
+                # Stay in initial state and ask for clarification
+                return {
+                    "bot_message": parsed.get("clarification_message", "Could you provide more details?"),
+                    "state": "collecting_initial",
+                    "data": {"parsed": parsed}
+                }
+            
             # Update preferences with parsed values
             if parsed.get("goals"):
                 preferences["goals"] = parsed["goals"]
@@ -170,6 +179,15 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
     elif state == "collecting_initial":
         parsed = parse_initial_query(user_input)
         
+        # Check if clarification is needed
+        if parsed.get("needs_clarification") and parsed.get("confidence") == "low":
+            # Ask for clarification
+            return {
+                "bot_message": parsed.get("clarification_message", "Could you provide more details about your investment preferences?"),
+                "state": "collecting_initial",
+                "data": {}
+            }
+        
         # Update preferences
         if parsed.get("goals"):
             preferences["goals"] = parsed["goals"]
@@ -189,6 +207,17 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
             understood.append(f"Risk: {preferences['risk_tolerance'].upper()}")
         
         understood_text = "\n".join([f"• {item}" for item in understood]) if understood else ""
+        
+        # If clarification needed but some info was gathered, ask for missing parts
+        if parsed.get("needs_clarification") and understood_text:
+            return {
+                "bot_message": (
+                    f"✓ Understood:\n{understood_text}\n\n"
+                    f"{parsed.get('clarification_message', 'What else would you like to specify?')}"
+                ),
+                "state": "collecting_initial",
+                "data": {}
+            }
         
         # Determine what to ask next
         if preferences["goals"] is None:
@@ -607,6 +636,40 @@ def format_research_results(research_data: Dict, preferences: Dict) -> str:
                 </div>
                 """
             html += "</div>"
+        html += "</div>"
+    
+    # Stock Recommendations
+    stock_recs = research_data.get("stock_recommendations", {})
+    if stock_recs and "error" not in stock_recs:
+        html += "<div class='result-section'><h3>📈 Stock Recommendations</h3>"
+        
+        for goal, goal_data in stock_recs.items():
+            if isinstance(goal_data, dict) and "stocks" in goal_data:
+                stocks = goal_data.get("stocks", [])
+                goal_display = goal.upper()
+                html += f"<h4>{goal_display} Goal - {goal_data.get('summary', '')}</h4>"
+                
+                if stocks:
+                    html += "<div class='stock-recommendations'>"
+                    for idx, stock in enumerate(stocks, 1):
+                        html += f"""
+                        <div class='stock-card'>
+                            <div class='stock-header'>
+                                <span class='stock-ticker'>{stock['ticker']}</span>
+                                <span class='stock-price'>${stock['price']}</span>
+                            </div>
+                            <h5>{stock['name']}</h5>
+                            <div class='stock-metrics'>
+                                <div class='metric'><strong>1M Performance:</strong> {stock['performance_1m']}</div>
+                                <div class='metric'><strong>Volatility:</strong> {stock['volatility']}</div>
+                                {f"<div class='metric'><strong>Dividend Yield:</strong> {stock['dividend_yield']}</div>" if stock.get('dividend_yield') != 'N/A' else ''}
+                                {f"<div class='metric'><strong>ESG Score:</strong> {stock['esg_score']}</div>" if stock.get('esg_score') != 'N/A' else ''}
+                            </div>
+                            <div class='stock-score'>Score: {stock['score']}</div>
+                            {f"<p class='stock-reasons'><strong>Why:</strong> {', '.join(stock['reasons'][:2])}</p>" if stock.get('reasons') else ''}
+                        </div>
+                        """
+                    html += "</div>"
         html += "</div>"
     
     # AI Summaries
