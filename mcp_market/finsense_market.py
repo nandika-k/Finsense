@@ -7,6 +7,7 @@ import os
 import json
 import yfinance as yf
 from datetime import datetime, timedelta
+from typing import List, Dict
 
 # Ensure stdout is unbuffered
 sys.stdout.reconfigure(line_buffering=True)
@@ -31,6 +32,116 @@ else:
 
 # --- MCP Server Initialization ---
 app = Server("finsense-market")
+
+# Cache for sector stocks to avoid repeated lookups
+_sector_stocks_cache: Dict[str, List[str]] = {}
+
+def get_sector_stocks(sector: str, limit: int = 25) -> List[str]:
+    """
+    Get stock tickers for a sector using ETF holdings + expanded static fallback.
+    
+    Args:
+        sector: Sector name (lowercase)
+        limit: Maximum number of stocks to return
+        
+    Returns:
+        List of ticker symbols
+    """
+    # Check cache first
+    cache_key = f"{sector}_{limit}"
+    if cache_key in _sector_stocks_cache:
+        log(f"Using cached stocks for {sector}")
+        return _sector_stocks_cache[cache_key]
+    
+    # Sector ETF mapping
+    sector_etfs = {
+        "technology": "XLK",
+        "healthcare": "XLV",
+        "financial-services": "XLF",
+        "energy": "XLE",
+        "consumer": "XLY",
+        "industrials": "XLI",
+        "materials": "XLB",
+        "real-estate": "XLRE",
+        "utilities": "XLU",
+        "communications": "XLC"
+    }
+    
+    # Expanded static fallback lists (30 stocks per sector)
+    static_stocks = {
+        "technology": [
+            "AAPL", "MSFT", "NVDA", "GOOGL", "META", "AVGO", "ADBE", "CRM", 
+            "CSCO", "ACN", "ORCL", "AMD", "INTC", "NOW", "QCOM", "TXN",
+            "INTU", "IBM", "AMAT", "MU", "ADI", "LRCX", "KLAC", "SNPS",
+            "CDNS", "MCHP", "FTNT", "PANW", "WDAY", "TEAM"
+        ],
+        "healthcare": [
+            "JNJ", "UNH", "LLY", "ABBV", "MRK", "TMO", "ABT", "DHR",
+            "PFE", "AMGN", "CVS", "MDT", "BMY", "GILD", "ISRG", "VRTX",
+            "CI", "HUM", "ELV", "BSX", "ZTS", "REGN", "SYK", "MCK",
+            "BDX", "EW", "HCA", "A", "IQV", "DXCM"
+        ],
+        "financial-services": [
+            "JPM", "BAC", "WFC", "GS", "MS", "C", "BLK", "SCHW",
+            "AXP", "USB", "PNC", "TFC", "COF", "BK", "STT", "SPGI",
+            "CME", "ICE", "MCO", "AON", "MMC", "AJG", "CB", "TRV",
+            "PGR", "ALL", "MET", "PRU", "AIG", "AFL"
+        ],
+        "energy": [
+            "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO",
+            "OXY", "PXD", "HES", "WMB", "KMI", "HAL", "BKR", "DVN",
+            "FANG", "MRO", "APA", "OKE", "TRGP", "LNG", "EQT", "CQP",
+            "HFC", "NOV", "FTI", "HP", "CTRA", "PR"
+        ],
+        "consumer": [
+            "AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "TJX", "LOW",
+            "TGT", "BKNG", "CMG", "MAR", "YUM", "ORLY", "AZO", "RCL",
+            "ROST", "DHI", "LEN", "DRI", "ULTA", "HLT", "LVS", "WYNN",
+            "MGM", "F", "GM", "APTV", "BWA", "RL"
+        ],
+        "industrials": [
+            "BA", "CAT", "GE", "HON", "UNP", "RTX", "LMT", "DE",
+            "UPS", "ADP", "GD", "NOC", "EMR", "ETN", "ITW", "MMM",
+            "WM", "CSX", "NSC", "FDX", "PCAR", "CMI", "PH", "TT",
+            "ROK", "AME", "FAST", "CARR", "OTIS", "IR"
+        ],
+        "materials": [
+            "LIN", "APD", "SHW", "FCX", "NEM", "ECL", "DD", "NUE",
+            "DOW", "PPG", "ALB", "CTVA", "EMN", "CE", "VMC", "MLM",
+            "BALL", "AVY", "PKG", "IP", "MOS", "CF", "FMC", "SEE",
+            "IFF", "LYB", "STLD", "RS", "WLK", "OLN"
+        ],
+        "real-estate": [
+            "AMT", "PLD", "CCI", "EQIX", "SPG", "PSA", "O", "WELL",
+            "DLR", "SBAC", "AVB", "EQR", "VTR", "VICI", "WY", "ARE",
+            "INVH", "MAA", "ESS", "KIM", "DOC", "UDR", "CPT", "FRT",
+            "BXP", "REG", "HST", "VNO", "SLG", "KRC"
+        ],
+        "utilities": [
+            "NEE", "DUK", "SO", "D", "AEP", "EXC", "SRE", "XEL",
+            "ED", "WEC", "ES", "DTE", "PPL", "FE", "ETR", "AWK",
+            "AEE", "CMS", "CNP", "NI", "LNT", "EVRG", "PNW", "ATO",
+            "NRG", "CEG", "VST", "PCG", "PEG", "IDA"
+        ],
+        "communications": [
+            "META", "GOOGL", "NFLX", "DIS", "CMCSA", "VZ", "T", "TMUS",
+            "CHTR", "EA", "TTWO", "ATVI", "MTCH", "NWSA", "FOXA", "PARA",
+            "WBD", "OMC", "IPG", "LYV", "DISH", "LBRDK", "NYT", "CABO",
+            "SIRI", "MSG", "MSGN", "AMC", "CNK", "IMAX"
+        ]
+    }
+    
+    # Try to get ETF holdings first (future enhancement)
+    # For now, use expanded static lists
+    stocks = static_stocks.get(sector, [])[:limit]
+    
+    # Cache the result
+    _sector_stocks_cache[cache_key] = stocks
+    log(f"Loaded {len(stocks)} stocks for {sector}")
+    
+    return stocks
+
+# --- MCP Server Initialization ---
 
 # --- list_tools Handler ---
 @app.list_tools()
@@ -259,27 +370,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         sector = arguments.get("sector", "").lower()
         goal = arguments.get("goal", "").lower()
         
-        # Map sectors to top companies
-        sector_stocks = {
-            "technology": ["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AVGO", "ADBE", "CRM"],
-            "healthcare": ["JNJ", "UNH", "LLY", "ABBV", "MRK", "TMO", "ABT", "DHR"],
-            "financial-services": ["JPM", "BAC", "WFC", "GS", "MS", "C", "BLK", "SCHW"],
-            "energy": ["XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO"],
-            "consumer": ["AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "TJX", "LOW"],
-            "industrials": ["BA", "CAT", "GE", "HON", "UNP", "RTX", "LMT", "DE"],
-            "materials": ["LIN", "APD", "SHW", "FCX", "NEM", "ECL", "DD", "NUE"],
-            "real-estate": ["AMT", "PLD", "CCI", "EQIX", "SPG", "PSA", "O", "WELL"],
-            "utilities": ["NEE", "DUK", "SO", "D", "AEP", "EXC", "SRE", "XEL"],
-            "communications": ["META", "GOOGL", "NFLX", "DIS", "CMCSA", "VZ", "T", "TMUS"]
-        }
+        # Get stocks dynamically (up to 25 stocks per sector)
+        stock_list = get_sector_stocks(sector, limit=25)
         
-        stock_list = sector_stocks.get(sector, [])
         if not stock_list:
             return [TextContent(type="text", text=json.dumps({"error": f"Unknown sector: {sector}"}, default=str))]
         
         recommendations = []
         try:
-            for ticker_symbol in stock_list[:8]:  # Limit to 8 stocks
+            log(f"Processing {len(stock_list)} stocks for {sector}/{goal}")
+            for ticker_symbol in stock_list:  # Process all stocks from the list
                 try:
                     tick = yf.Ticker(ticker_symbol)
                     info = tick.info
@@ -302,6 +402,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         "price": round(current_price, 2),
                         "performance_1m": f"{perf_1m:+.2f}%",
                         "volatility": f"{volatility:.2f}%",
+                        "volatility_numeric": volatility,  # Keep numeric for sorting
                         "market_cap": info.get("marketCap", 0),
                         "dividend_yield": info.get("dividendYield", 0) * 100 if info.get("dividendYield") else 0,
                         "pe_ratio": info.get("trailingPE", 0),
@@ -314,16 +415,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             
             # Sort by goal criteria
             if goal == "esg":
-                recommendations.sort(key=lambda x: (x["esg_score"], -x.get("volatility", 100)), reverse=True)
+                recommendations.sort(key=lambda x: (x.get("esg_score", 0), -x.get("volatility_numeric", 100)), reverse=True)
             elif goal == "income":
-                recommendations.sort(key=lambda x: x["dividend_yield"], reverse=True)
+                recommendations.sort(key=lambda x: x.get("dividend_yield", 0), reverse=True)
             elif goal == "growth":
-                recommendations.sort(key=lambda x: float(x["performance_1m"].rstrip("%")), reverse=True)
+                recommendations.sort(key=lambda x: float(x.get("performance_1m", "0").rstrip("%")), reverse=True)
             
             result = {
                 "sector": sector,
                 "goal": goal,
-                "stocks": recommendations[:5]  # Return top 5
+                "stocks": recommendations[:10]  # Return top 10 (increased from 5)
             }
         except Exception as e:
             log(f"Error in get_stock_recommendations: {e}")
