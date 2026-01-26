@@ -803,20 +803,20 @@ class FinsenseCoordinator:
                 
                 # Goal-based scoring
                 if goal == "esg":
-                    # ESG scoring with fallback
-                    if esg_score > 50:
-                        score += 40
-                        reasons.append(f"Strong ESG score ({esg_score:.0f})")
-                    elif esg_score > 30:
+                    # ESG scoring - stocks are pre-filtered by ESG ETF membership
+                    # ESG score of 70 = qualified (in ESG ETF), 0 = not qualified
+                    if esg_score >= 70:
+                        score += 30
+                        reasons.append("ESG-qualified (in ESG ETF)")
+                    elif esg_score > 50:
                         score += 20
-                        reasons.append(f"Good ESG score ({esg_score:.0f})")
-                    elif esg_score > 0:
+                        reasons.append(f"Strong ESG score ({esg_score:.0f})")
+                    elif esg_score > 20:
                         score += 10
                         reasons.append(f"ESG score: {esg_score:.0f}")
                     else:
-                        # Fallback: score based on sector alignment and performance
-                        score += 15
-                        reasons.append("ESG-friendly sector")
+                        # Skip stocks without ESG qualification
+                        continue
                     
                     if volatility < 25:
                         score += 10
