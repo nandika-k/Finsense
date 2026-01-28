@@ -859,8 +859,6 @@ class FinsenseCoordinator:
                 }
         
         return stock_recommendations
-            "summary": f"Identified {len(ranked_sectors)} sectors aligned with your goals"
-        }
 
     async def cleanup(self):
         """Clean up all connections"""

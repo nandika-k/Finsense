@@ -13,19 +13,52 @@ class ChatbotUI {
         
         this.initializeEventListeners();
         this.adjustTextareaHeight();
-        this.loadWelcomeMessage();
+        
+        // Load welcome message (async but fire-and-forget with error handling)
+        this.loadWelcomeMessage().catch(error => {
+            console.error('Error loading welcome message:', error);
+            // Ensure fallback message shows even if promise rejection isn't caught
+            this.addBotMessage('Welcome! Unable to connect to server. Please check your connection and try again.');
+        });
     }
     
     async loadWelcomeMessage() {
         try {
-            // Send empty message to get welcome
-            const response = await this.sendChatMessage('');
-            this.sessionId = response.session_id;
-            this.currentState = response.state;
-            this.addBotMessage(response.bot_message);
+            // Send empty message to get welcome with timeout
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+            
+            const response = await fetch(`${API_BASE_URL}/api/chat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    session_id: this.sessionId,
+                    message: ''
+                }),
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            if (!data || !data.bot_message) {
+                throw new Error('Invalid response from server');
+            }
+            
+            this.sessionId = data.session_id;
+            this.currentState = data.state;
+            this.addBotMessage(data.bot_message);
         } catch (error) {
-            // Fallback welcome message if API fails
-            this.addBotMessage('Welcome! Unable to connect to server. Please check your connection and try again.');
+            // If API fails, throw error to be caught by constructor's catch handler
+            console.error('Welcome message API error:', error);
+            throw error;
         }
     }
 
