@@ -874,7 +874,6 @@ class FinsenseCoordinator:
         
         return stock_recommendations
 
-
     async def cleanup(self):
         """Clean up all connections"""
         logger.info("Shutting down...")

@@ -13,19 +13,52 @@ class ChatbotUI {
         
         this.initializeEventListeners();
         this.adjustTextareaHeight();
-        this.loadWelcomeMessage();
+        
+        // Load welcome message (async but fire-and-forget with error handling)
+        this.loadWelcomeMessage().catch(error => {
+            console.error('Error loading welcome message:', error);
+            // Ensure fallback message shows even if promise rejection isn't caught
+            this.addBotMessage('Welcome! Unable to connect to server. Please check your connection and try again.');
+        });
     }
     
     async loadWelcomeMessage() {
         try {
-            // Send empty message to get welcome
-            const response = await this.sendChatMessage('');
-            this.sessionId = response.session_id;
-            this.currentState = response.state;
-            this.addBotMessage(response.bot_message);
+            // Send empty message to get welcome with timeout
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+            
+            const response = await fetch(`${API_BASE_URL}/api/chat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    session_id: this.sessionId,
+                    message: ''
+                }),
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            if (!data || !data.bot_message) {
+                throw new Error('Invalid response from server');
+            }
+            
+            this.sessionId = data.session_id;
+            this.currentState = data.state;
+            this.addBotMessage(data.bot_message);
         } catch (error) {
-            // Fallback welcome message if API fails
-            this.addBotMessage('Welcome! Unable to connect to server. Please check your connection and try again.');
+            // If API fails, throw error to be caught by constructor's catch handler
+            console.error('Welcome message API error:', error);
+            throw error;
         }
     }
 
@@ -120,8 +153,12 @@ class ChatbotUI {
         this.setInputEnabled(false);
         
         try {
-            // Update progress
-            this.updateProgressMessage(this.progressMessageId, 'Fetching market data...');
+            // Simulate realistic progress updates
+            await new Promise(resolve => setTimeout(resolve, 300));
+            this.updateProgressMessage(this.progressMessageId, 'Pulling market data...');
+            
+            await new Promise(resolve => setTimeout(resolve, 400));
+            this.updateProgressMessage(this.progressMessageId, 'Analyzing sector performance...');
             
             // Trigger research
             const response = await fetch(`${API_BASE_URL}/api/research`, {
@@ -138,22 +175,27 @@ class ChatbotUI {
                 throw new Error(`Research failed: ${response.status}`);
             }
             
+            // Show risk analysis progress
+            this.updateProgressMessage(this.progressMessageId, 'Evaluating risk profiles...');
+            await new Promise(resolve => setTimeout(resolve, 300));
+            
             const result = await response.json();
             
-            // Update progress
-            this.updateProgressMessage(this.progressMessageId, 'Analyzing sectors and risks...');
+            // Update progress based on what was analyzed
+            this.updateProgressMessage(this.progressMessageId, 'Analyzing market news & trends...');
+            await new Promise(resolve => setTimeout(resolve, 400));
             
-            // Wait a moment for dramatic effect
-            await new Promise(resolve => setTimeout(resolve, 500));
+            this.updateProgressMessage(this.progressMessageId, 'Finding stock opportunities...');
+            await new Promise(resolve => setTimeout(resolve, 400));
             
-            this.updateProgressMessage(this.progressMessageId, 'Generating insights...');
+            this.updateProgressMessage(this.progressMessageId, 'Generating AI insights...');
             await new Promise(resolve => setTimeout(resolve, 500));
             
             // Remove progress message
             this.removeProgressMessage(this.progressMessageId);
             
             // Display results
-            this.displayResults(result.results.html);
+            await this.displayResults(result.results.html);
             
             // Show completion message
             this.addBotMessage('Analysis complete! You can ask me to analyze different sectors or start a new analysis by sending me a message.');
@@ -197,13 +239,18 @@ class ChatbotUI {
 
         const content = document.createElement('div');
         content.className = 'message-content';
-        content.innerHTML = `<p>${this.escapeHtml(text)}</p>`;
 
         messageDiv.appendChild(avatar);
         messageDiv.appendChild(content);
-
         this.messagesArea.appendChild(messageDiv);
-        this.scrollToBottom();
+        
+        // User messages appear instantly, bot messages animate
+        if (type === 'user') {
+            content.innerHTML = `<p>${this.escapeHtml(text)}</p>`;
+            this.scrollToBottom();
+        } else {
+            this.animateMessage(content, text);
+        }
     }
 
     showTypingIndicator() {
@@ -262,15 +309,52 @@ class ChatbotUI {
         const content = document.createElement('div');
         content.className = 'message-content';
         
-        // Convert markdown-like formatting to HTML
-        const formattedMessage = this.formatMarkdown(message);
-        content.innerHTML = formattedMessage;
-
         messageDiv.appendChild(avatar);
         messageDiv.appendChild(content);
-
         this.messagesArea.appendChild(messageDiv);
-        this.scrollToBottom();
+        
+        // Animate the message appearing line by line
+        this.animateMessage(content, message);
+    }
+    
+    async animateMessage(contentElement, message) {
+        // Convert markdown-like formatting to HTML
+        const formattedMessage = this.formatMarkdown(message);
+        
+        // Create a temporary element to parse the HTML
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = formattedMessage;
+        
+        // Split into lines/paragraphs for line-by-line display
+        const elements = Array.from(tempDiv.children);
+        
+        if (elements.length === 0) {
+            // Simple text without block elements
+            contentElement.innerHTML = formattedMessage;
+            this.scrollToBottom();
+            return;
+        }
+        
+        // Display each element with a delay
+        for (let i = 0; i < elements.length; i++) {
+            const element = elements[i].cloneNode(true);
+            element.style.opacity = '0';
+            element.style.transform = 'translateY(10px)';
+            element.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+            
+            contentElement.appendChild(element);
+            
+            // Trigger animation
+            await new Promise(resolve => setTimeout(resolve, 50));
+            element.style.opacity = '1';
+            element.style.transform = 'translateY(0)';
+            
+            this.scrollToBottom();
+            
+            // Wait before showing next line (shorter delay for list items)
+            const delay = element.tagName === 'LI' ? 100 : 200;
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
     }
     
     formatMarkdown(text) {
@@ -323,9 +407,18 @@ class ChatbotUI {
 
         messageDiv.appendChild(avatar);
         messageDiv.appendChild(content);
-
         this.messagesArea.appendChild(messageDiv);
-        this.scrollToBottom();
+        
+        // Fade in animation
+        messageDiv.style.opacity = '0';
+        messageDiv.style.transform = 'translateY(10px)';
+        messageDiv.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        
+        setTimeout(() => {
+            messageDiv.style.opacity = '1';
+            messageDiv.style.transform = 'translateY(0)';
+            this.scrollToBottom();
+        }, 50);
         
         return messageId;
     }
@@ -347,7 +440,7 @@ class ChatbotUI {
         }
     }
     
-    displayResults(htmlContent) {
+    async displayResults(htmlContent) {
         const messageDiv = document.createElement('div');
         messageDiv.className = 'message bot-message results-message';
 
@@ -363,13 +456,43 @@ class ChatbotUI {
 
         const content = document.createElement('div');
         content.className = 'message-content results-content';
-        content.innerHTML = htmlContent;
 
         messageDiv.appendChild(avatar);
         messageDiv.appendChild(content);
-
         this.messagesArea.appendChild(messageDiv);
-        this.scrollToBottom();
+        
+        // Parse HTML and animate sections
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = htmlContent;
+        
+        // Get all result-section divs
+        const sections = tempDiv.querySelectorAll('.result-section');
+        
+        if (sections.length === 0) {
+            // No sections, display all at once with simple fade
+            content.innerHTML = htmlContent;
+            this.scrollToBottom();
+            return;
+        }
+        
+        // Display each section with a delay
+        for (let section of sections) {
+            section.style.opacity = '0';
+            section.style.transform = 'translateY(10px)';
+            section.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
+            
+            content.appendChild(section);
+            
+            // Trigger animation
+            await new Promise(resolve => setTimeout(resolve, 50));
+            section.style.opacity = '1';
+            section.style.transform = 'translateY(0)';
+            
+            this.scrollToBottom();
+            
+            // Wait before showing next section
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
     }
 
     scrollToBottom() {

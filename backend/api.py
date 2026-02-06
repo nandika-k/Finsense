@@ -139,14 +139,14 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
                 preferences["risk_tolerance"] = parsed["risk_tolerance"]
             
             # Determine next state based on what was parsed
-            if preferences["goals"] is None:
+            if not preferences.get("goals"):
                 # Need to collect goals
                 return {
                     "bot_message": format_goals_question(parsed),
                     "state": "collecting_goals",
                     "data": {"parsed": parsed}
                 }
-            elif preferences["sectors"] is None:
+            elif not preferences.get("sectors"):
                 # Have goals, need sectors
                 suggested = suggest_sectors_from_goals(preferences["goals"])
                 return {
@@ -154,7 +154,7 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
                     "state": "collecting_sectors",
                     "data": {"suggested_sectors": suggested}
                 }
-            elif preferences["risk_tolerance"] is None:
+            elif not preferences.get("risk_tolerance"):
                 # Have goals and sectors, need risk
                 return {
                     "bot_message": format_risk_question(),
@@ -189,22 +189,26 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
                 "data": {}
             }
         
-        # Update preferences
+        # Update preferences (store what was parsed for debugging)
         if parsed.get("goals"):
             preferences["goals"] = parsed["goals"]
         if parsed.get("sectors"):
             preferences["sectors"] = parsed["sectors"]
         if parsed.get("risk_tolerance"):
             preferences["risk_tolerance"] = parsed["risk_tolerance"]
+            print(f"[DEBUG] Set risk_tolerance to: {preferences['risk_tolerance']}")
+        
+        # DEBUG: Log current preferences state
+        print(f"[DEBUG] After parsing - preferences: goals={preferences.get('goals')}, sectors={preferences.get('sectors')}, risk={preferences.get('risk_tolerance')}")
         
         # Show what was understood
         understood = []
-        if preferences["goals"]:
+        if preferences.get("goals"):
             goal_names = [INVESTMENT_GOALS[g]["name"] for g in preferences["goals"]]
             understood.append(f"Goals: {', '.join(goal_names)}")
-        if preferences["sectors"]:
+        if preferences.get("sectors"):
             understood.append(f"Sectors: {', '.join(preferences['sectors'])}")
-        if preferences["risk_tolerance"]:
+        if preferences.get("risk_tolerance"):
             understood.append(f"Risk: {preferences['risk_tolerance'].upper()}")
         
         understood_text = "\n".join([f"• {item}" for item in understood]) if understood else ""
@@ -221,7 +225,7 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
             }
         
         # Determine what to ask next
-        if preferences["goals"] is None:
+        if not preferences.get("goals"):
             return {
                 "bot_message": (
                     f"{'✓ Understood:\n' + understood_text if understood_text else ''}\n\n"
@@ -230,7 +234,7 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
                 "state": "collecting_goals",
                 "data": {}
             }
-        elif preferences["sectors"] is None:
+        elif not preferences.get("sectors"):
             suggested = suggest_sectors_from_goals(preferences["goals"])
             return {
                 "bot_message": (
@@ -240,7 +244,7 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
                 "state": "collecting_sectors",
                 "data": {"suggested_sectors": suggested}
             }
-        elif preferences["risk_tolerance"] is None:
+        elif not preferences.get("risk_tolerance"):
             return {
                 "bot_message": (
                     f"✓ Understood:\n{understood_text}\n\n"
@@ -258,144 +262,210 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
     
     # Collecting goals
     elif state == "collecting_goals":
-        # Check if user provided goals
+        # First, try to parse the full input to see if they provided other info too
+        parsed = parse_initial_query(user_input)
+        
+        # Update any provided preferences
+        if parsed.get("sectors") and not preferences.get("sectors"):
+            preferences["sectors"] = parsed["sectors"]
+        if parsed.get("risk_tolerance") and not preferences.get("risk_tolerance"):
+            preferences["risk_tolerance"] = parsed["risk_tolerance"]
+        
+        # Handle goals parsing
+        suggested_sectors = []
         if not user_input.strip():
             # No goals - exploratory mode
             preferences["goals"] = []
-            suggested_sectors = []
-        else:
+        elif parsed.get("goals"):
+            # Goals already parsed from initial query
+            preferences["goals"] = parsed["goals"]
+            suggested_sectors = suggest_sectors_from_goals(parsed["goals"])
+        elif llm_client and not user_input[0].isdigit():
             # Try to parse goals with LLM
-            if llm_client and not user_input[0].isdigit():
-                from ui.chatbot import parse_with_llm
-                goal_keys = list(INVESTMENT_GOALS.keys())
-                parsed_goals = parse_with_llm(
-                    llm_client,
-                    user_input,
-                    "Investment goals for financial research",
-                    goal_keys
-                )
-                if parsed_goals:
-                    preferences["goals"] = parsed_goals
-                    suggested_sectors = suggest_sectors_from_goals(parsed_goals)
-                else:
-                    # Could not parse
-                    return {
-                        "bot_message": "I couldn't understand those goals. Please try again or describe your investment objectives.",
-                        "state": "collecting_goals",
-                        "data": {}
-                    }
+            from ui.chatbot import parse_with_llm
+            goal_keys = list(INVESTMENT_GOALS.keys())
+            parsed_goals = parse_with_llm(
+                llm_client,
+                user_input,
+                "Investment goals for financial research",
+                goal_keys
+            )
+            if parsed_goals:
+                preferences["goals"] = parsed_goals
+                suggested_sectors = suggest_sectors_from_goals(parsed_goals)
             else:
-                # Try number parsing
-                try:
-                    selected_indices = [int(x.strip()) for x in user_input.split(",")]
-                    goal_keys = list(INVESTMENT_GOALS.keys())
-                    selected_goals = []
-                    
-                    for idx in selected_indices:
-                        if 1 <= idx <= len(INVESTMENT_GOALS):
-                            selected_goals.append(goal_keys[idx - 1])
-                        elif idx == len(INVESTMENT_GOALS) + 1:
-                            # "Other" option - no goals
-                            selected_goals = []
-                            break
-                    
-                    preferences["goals"] = selected_goals
-                    suggested_sectors = suggest_sectors_from_goals(selected_goals)
-                except (ValueError, IndexError):
-                    return {
-                        "bot_message": "Invalid input. Please enter goal numbers (e.g., '1,3') or describe your goals.",
-                        "state": "collecting_goals",
-                        "data": {}
-                    }
+                # Could not parse
+                return {
+                    "bot_message": "I couldn't understand those goals. Please try again or describe your investment objectives.",
+                    "state": "collecting_goals",
+                    "data": {}
+                }
+        else:
+            # Try number parsing
+            try:
+                selected_indices = [int(x.strip()) for x in user_input.split(",")]
+                goal_keys = list(INVESTMENT_GOALS.keys())
+                selected_goals = []
+                
+                for idx in selected_indices:
+                    if 1 <= idx <= len(INVESTMENT_GOALS):
+                        selected_goals.append(goal_keys[idx - 1])
+                    elif idx == len(INVESTMENT_GOALS) + 1:
+                        # "Other" option - no goals
+                        selected_goals = []
+                        break
+                
+                preferences["goals"] = selected_goals
+                suggested_sectors = suggest_sectors_from_goals(selected_goals)
+            except (ValueError, IndexError):
+                return {
+                    "bot_message": "Invalid input. Please enter goal numbers (e.g., '1,3') or describe your goals.",
+                    "state": "collecting_goals",
+                    "data": {}
+                }
         
-        # Move to sector collection
-        return {
-            "bot_message": format_sectors_question(preferences["goals"], suggested_sectors),
-            "state": "collecting_sectors",
-            "data": {"suggested_sectors": suggested_sectors}
-        }
+        # Determine what to ask next based on what's still missing
+        if not preferences.get("sectors"):
+            return {
+                "bot_message": format_sectors_question(preferences["goals"], suggested_sectors),
+                "state": "collecting_sectors",
+                "data": {"suggested_sectors": suggested_sectors}
+            }
+        elif not preferences.get("risk_tolerance"):
+            return {
+                "bot_message": format_risk_question(),
+                "state": "collecting_risk",
+                "data": {}
+            }
+        else:
+            return {
+                "bot_message": format_confirmation(preferences),
+                "state": "confirming",
+                "data": {}
+            }
     
     # Collecting sectors
     elif state == "collecting_sectors":
+        # DEBUG: Log what we're starting with
+        print(f"[DEBUG] collecting_sectors - Starting preferences: goals={preferences.get('goals')}, sectors={preferences.get('sectors')}, risk={preferences.get('risk_tolerance')}")
+        
+        # First, try to parse the full input to see if they provided risk too
+        parsed = parse_initial_query(user_input)
+        if parsed.get("risk_tolerance") and not preferences.get("risk_tolerance"):
+            preferences["risk_tolerance"] = parsed["risk_tolerance"]
+            print(f"[DEBUG] Updated risk_tolerance from parsed: {preferences['risk_tolerance']}")
+        
         suggested_sectors = session.get("data", {}).get("suggested_sectors", [])
         
-        # Check for delegation
-        if llm_client and is_delegating_decision(llm_client, user_input, "sector selection"):
+        # Check if sectors were already parsed from full query
+        if parsed.get("sectors"):
+            preferences["sectors"] = parsed["sectors"]
+        # Empty input with suggestions - use suggested
+        elif not user_input.strip() and suggested_sectors:
+            preferences["sectors"] = suggested_sectors
+        # Check for delegation ("you choose", "up to you", etc.)
+        elif llm_client and is_delegating_decision(llm_client, user_input, "sector selection"):
             if suggested_sectors:
                 preferences["sectors"] = suggested_sectors
             else:
                 # Default diversified approach
                 preferences["sectors"] = ["technology", "healthcare", "financial-services", "consumer", "industrials"]
+        # Type 'all' for all sectors
         elif user_input.strip().lower() == "all":
             preferences["sectors"] = AVAILABLE_SECTORS.copy()
-        elif not user_input.strip() and suggested_sectors:
-            # Use suggested sectors
-            preferences["sectors"] = suggested_sectors
-        elif llm_client and not user_input[0].isdigit():
-            # Parse with LLM
-            parsed_sectors = parse_sectors_with_llm(llm_client, user_input)
-            if parsed_sectors:
-                preferences["sectors"] = parsed_sectors
+        # Try semantic parsing with LLM first for any text input
+        elif llm_client and user_input.strip():
+            # Check if it's pure numbers first
+            if user_input.strip().replace(',', '').replace(' ', '').isdigit():
+                # Parse numbers
+                try:
+                    selected_indices = [int(x.strip()) for x in user_input.split(",")]
+                    selected_sectors = []
+                    for idx in selected_indices:
+                        if 1 <= idx <= len(AVAILABLE_SECTORS):
+                            selected_sectors.append(AVAILABLE_SECTORS[idx - 1])
+                    preferences["sectors"] = selected_sectors
+                except (ValueError, IndexError):
+                    return {
+                        "bot_message": "Invalid input. Please enter sector numbers (e.g., '1,2,5') or describe the sectors.",
+                        "state": "collecting_sectors",
+                        "data": {"suggested_sectors": suggested_sectors}
+                    }
             else:
-                return {
-                    "bot_message": "I couldn't understand those sectors. Please try again.",
-                    "state": "collecting_sectors",
-                    "data": {"suggested_sectors": suggested_sectors}
-                }
-        else:
-            # Parse numbers
-            try:
-                selected_indices = [int(x.strip()) for x in user_input.split(",")]
-                selected_sectors = []
-                for idx in selected_indices:
-                    if 1 <= idx <= len(AVAILABLE_SECTORS):
-                        selected_sectors.append(AVAILABLE_SECTORS[idx - 1])
-                preferences["sectors"] = selected_sectors
-            except (ValueError, IndexError):
-                return {
-                    "bot_message": "Invalid input. Please enter sector numbers (e.g., '1,2,5') or describe the sectors.",
-                    "state": "collecting_sectors",
-                    "data": {"suggested_sectors": suggested_sectors}
-                }
+                # Parse with LLM for natural language
+                parsed_sectors = parse_sectors_with_llm(llm_client, user_input)
+                if parsed_sectors:
+                    preferences["sectors"] = parsed_sectors
+                else:
+                    return {
+                        "bot_message": "I couldn't understand those sectors. Please try again or enter numbers (e.g., '1,2,5').",
+                        "state": "collecting_sectors",
+                        "data": {"suggested_sectors": suggested_sectors}
+                    }
         
-        # Move to risk collection
-        return {
-            "bot_message": format_risk_question(),
-            "state": "collecting_risk",
-            "data": {}
-        }
+        # Determine what to ask next
+        risk_value = preferences.get("risk_tolerance")
+        print(f"[DEBUG] Before final check - risk_tolerance value: '{risk_value}', type: {type(risk_value)}, bool: {bool(risk_value)}")
+        print(f"[DEBUG] Full preferences dict: {preferences}")
+        
+        if not risk_value or risk_value not in ["low", "medium", "high"]:
+            print(f"[DEBUG] Risk tolerance is missing or invalid, asking for it")
+            return {
+                "bot_message": format_risk_question(),
+                "state": "collecting_risk",
+                "data": {}
+            }
+        else:
+            print(f"[DEBUG] Risk tolerance exists: {risk_value}, going to confirmation")
+            return {
+                "bot_message": format_confirmation(preferences),
+                "state": "confirming",
+                "data": {}
+            }
     
     # Collecting risk tolerance
     elif state == "collecting_risk":
-        risk_map = {"1": "low", "2": "medium", "3": "high"}
+        # First, try to parse the full input in case they provided other info
+        parsed = parse_initial_query(user_input)
+        if parsed.get("goals") and not preferences.get("goals"):
+            preferences["goals"] = parsed["goals"]
+        if parsed.get("sectors") and not preferences.get("sectors"):
+            preferences["sectors"] = parsed["sectors"]
         
-        if user_input.strip().lower() in ["low", "medium", "high"]:
-            preferences["risk_tolerance"] = user_input.strip().lower()
-        elif user_input.strip() in ["1", "2", "3"]:
-            preferences["risk_tolerance"] = risk_map[user_input.strip()]
-        elif llm_client:
-            # Parse with LLM
-            from ui.chatbot import parse_with_llm
-            parsed_risk = parse_with_llm(
-                llm_client,
-                user_input,
-                "Risk tolerance level for investing",
-                ["low", "medium", "high"]
-            )
-            if parsed_risk and len(parsed_risk) == 1:
-                preferences["risk_tolerance"] = parsed_risk[0]
+        # Check if risk was already parsed
+        if parsed.get("risk_tolerance"):
+            preferences["risk_tolerance"] = parsed["risk_tolerance"]
+        else:
+            # Manual parsing
+            risk_map = {"1": "low", "2": "medium", "3": "high"}
+            
+            if user_input.strip().lower() in ["low", "medium", "high"]:
+                preferences["risk_tolerance"] = user_input.strip().lower()
+            elif user_input.strip() in ["1", "2", "3"]:
+                preferences["risk_tolerance"] = risk_map[user_input.strip()]
+            elif llm_client:
+                # Parse with LLM
+                from ui.chatbot import parse_with_llm
+                parsed_risk = parse_with_llm(
+                    llm_client,
+                    user_input,
+                    "Risk tolerance level for investing",
+                    ["low", "medium", "high"]
+                )
+                if parsed_risk and len(parsed_risk) == 1:
+                    preferences["risk_tolerance"] = parsed_risk[0]
+                else:
+                    return {
+                        "bot_message": "Please specify your risk tolerance: low, medium, or high (or enter 1-3).",
+                        "state": "collecting_risk",
+                        "data": {}
+                    }
             else:
                 return {
                     "bot_message": "Please specify your risk tolerance: low, medium, or high (or enter 1-3).",
                     "state": "collecting_risk",
                     "data": {}
                 }
-        else:
-            return {
-                "bot_message": "Please specify your risk tolerance: low, medium, or high (or enter 1-3).",
-                "state": "collecting_risk",
-                "data": {}
-            }
         
         # Move to confirmation
         return {
@@ -453,7 +523,6 @@ You can tell me everything at once, or we'll go step-by-step.
 • "ESG investing in healthcare and energy sectors"  
 • "Low risk defensive strategy"
 • Type "ideas" or "help" to see available goal options
-• Just press Enter to go through each question
 
 What are you looking for?"""
 
@@ -489,8 +558,6 @@ def format_sectors_question(goals: List[str], suggested: List[str]) -> str:
     msg += "• Natural language: 'tech and pharma', 'renewable energy'\n"
     msg += "• Numbers: '1,2,5'\n"
     msg += "• Type 'all' for all sectors\n"
-    if suggested:
-        msg += "• Press Enter to use suggested sectors"
     
     return msg
 
