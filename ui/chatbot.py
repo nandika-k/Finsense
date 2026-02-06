@@ -567,9 +567,13 @@ Examples:
 "I trust your judgment" → true
 "you pick" → true
 "surprise me" → true
+"whatever you think" → true
+"your call" → true
+"you choose" → true
 "tech and healthcare" → false
 "1,2,3" → false
 "all sectors" → false
+"technology" → false
 
 Answer (true or false):"""
 
