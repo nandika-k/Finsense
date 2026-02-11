@@ -793,6 +793,61 @@ def collect_risk_tolerance() -> str:
         print("  [!] Please specify low, medium, or high (or enter 1-3)")
 
 
+def parse_yes_no(response: str) -> Optional[bool]:
+    """Semantically parse yes/no responses using LLM.
+    
+    Returns:
+        True for yes/affirmative
+        False for no/negative
+        None if uncertain/unclear
+    """
+    response = response.strip().lower()
+    
+    # First check exact matches for speed
+    if response in ["yes", "y", "yep", "yeah", "yea", "sure", "ok", "okay", "correct", "right", "affirmative", "proceed", "confirm"]:
+        return True
+    if response in ["no", "n", "nope", "nah", "negative", "incorrect", "wrong", "cancel"]:
+        return False
+    
+    # Use LLM for semantic understanding of ambiguous responses
+    llm_client = get_llm_client()
+    if not llm_client:
+        return None  # Uncertain without LLM
+    
+    try:
+        prompt = f"""Classify this response as yes, no, or unclear.
+
+User response: "{response}"
+
+Classify as:
+- "yes" if the user is affirming, agreeing, or saying positive (examples: yeah, yea, sure, ok, correct, right, affirmative, yup, uh-huh, definitely, absolutely)
+- "no" if the user is declining, disagreeing, or saying negative (examples: nah, nope, negative, wrong, incorrect, nay, nuh-uh)
+- "unclear" if you cannot confidently determine yes or no, or if the response is ambiguous
+
+Return ONLY one word: yes, no, or unclear"""
+
+        llm_response = llm_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=10
+        )
+        
+        classification = llm_response.choices[0].message.content.strip().lower()
+        
+        if classification == "yes":
+            return True
+        elif classification == "no":
+            return False
+        else:
+            return None  # Unclear
+            
+    except Exception as e:
+        if os.getenv("DEBUG_CHATBOT"):
+            print(f"[DEBUG] Yes/No parsing error: {e}")
+        return None  # Uncertain on error
+
+
 def confirm_preferences(goals: List[str], sectors: List[str], risk_tolerance: str) -> bool:
     """Display summary and ask for confirmation"""
     print("\n" + "="*80)
@@ -811,13 +866,16 @@ def confirm_preferences(goals: List[str], sectors: List[str], risk_tolerance: st
     print("\n" + "-"*80)
     
     while True:
-        response = input("\nProceed with this analysis? (yes/no): ").strip().lower()
-        if response in ["yes", "y"]:
+        response = input("\nProceed with this analysis? (yes/no): ").strip()
+        
+        result = parse_yes_no(response)
+        
+        if result is True:
             return True
-        elif response in ["no", "n"]:
+        elif result is False:
             return False
         else:
-            print("  [!] Please enter 'yes' or 'no'")
+            print("  [!] I'm not sure what you mean. Please answer 'yes' or 'no'.")
 
 
 def show_goal_suggestions():
@@ -860,21 +918,81 @@ def run_chatbot() -> Optional[Dict]:
         print("  • 'I want growth in technology with medium risk'")
         print("  • 'ESG investing in healthcare and energy sectors'")
         print("  • 'Low risk defensive strategy'")
-        print("  • Type 'ideas' or 'help' to see available goal options\n")
+        print("  • Type 'ideas' or 'help' to see available goal options")
+        print("  • Type 'what sectors' to see all available sectors\n")
         
         initial_input = input("What are you looking for? ").strip()
         
-        # Check if user is asking for ideas/suggestions about goals
+        # Check if user is asking for ideas/suggestions using LLM for semantic understanding
         if initial_input:
-            asking_for_help = any(keyword in initial_input.lower() for keyword in [
+            initial_lower = initial_input.lower()
+            
+            # Basic keyword check for goals (fast path)
+            asking_for_goal_help = any(keyword in initial_lower for keyword in [
                 "ideas", "suggestions", "help", "what goals", "what options", 
                 "what can", "show me", "list goals", "available goals",
                 "don't know", "not sure", "unsure"
             ])
             
-            if asking_for_help:
+            # Use LLM to semantically detect if asking for sector information
+            asking_for_sector_help = False
+            if llm_client:
+                try:
+                    prompt = f"""Is the user asking to see available sectors or sector options?
+
+User input: "{initial_input}"
+
+Answer with ONLY "true" or "false".
+
+Examples:
+"what sectors are available" → true
+"show me sectors" → true
+"which sectors can I choose" → true
+"list all sectors" → true
+"what are my sector options" → true
+"sector ideas" → true
+"I want tech stocks" → false
+"growth investing" → false
+"help" → false
+
+Answer (true or false):"""
+
+                    response = llm_client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0,
+                        max_tokens=10
+                    )
+                    
+                    answer = response.choices[0].message.content.strip().lower()
+                    asking_for_sector_help = (answer == "true")
+                except Exception:
+                    # Fallback to keyword matching if LLM fails
+                    asking_for_sector_help = any(keyword in initial_lower for keyword in [
+                        "what sectors", "show sectors", "list sectors", "available sectors",
+                        "which sectors", "sector options"
+                    ])
+            else:
+                # No LLM available, use keyword matching
+                asking_for_sector_help = any(keyword in initial_lower for keyword in [
+                    "what sectors", "show sectors", "list sectors", "available sectors",
+                    "which sectors", "sector options"
+                ])
+            
+            if asking_for_goal_help and not asking_for_sector_help:
                 show_goal_suggestions()
-                print("\nNow that you've seen the options, let's try again!")
+                print("\nNow that you've seen the options, let's discuss your goals!")
+                continue  # Restart the loop to ask the question again
+            
+            if asking_for_sector_help:
+                print("\n" + "="*80)
+                print("AVAILABLE SECTORS")
+                print("="*80)
+                print("\nAll available sectors for analysis:\n")
+                for idx, sector in enumerate(AVAILABLE_SECTORS, 1):
+                    print(f"  {idx:2d}. {sector}")
+                print("\n" + "="*80)
+                print("\nNow that you've seen the sectors, let's discuss your goals!")
                 continue  # Restart the loop to ask the question again
         
         # Parse initial query
@@ -888,11 +1006,14 @@ def run_chatbot() -> Optional[Dict]:
             
             # Show what was understood
             understood = []
+            
             if goals:
                 goal_names = [INVESTMENT_GOALS[g]["name"] for g in goals]
                 understood.append(f"Goals: {', '.join(goal_names)}")
+            
             if sectors:
                 understood.append(f"Sectors: {', '.join(sectors)}")
+            
             if risk_tolerance:
                 understood.append(f"Risk: {risk_tolerance.upper()}")
             
@@ -900,6 +1021,12 @@ def run_chatbot() -> Optional[Dict]:
                 print("\n  ✓ Understood:")
                 for item in understood:
                     print(f"    • {item}")
+                
+                # If incomplete, ask again (goals can be None initially, that's ok - exploratory mode)
+                all_complete = (sectors is not None and risk_tolerance is not None)
+                if not all_complete:
+                    #print("\n  → Please provide the remaining information.")
+                    continue  # Loop back to ask again
         else:
             goals = None
             sectors = None
@@ -916,9 +1043,18 @@ def run_chatbot() -> Optional[Dict]:
             print("\n[Investment Goals]")
             goal_names = [INVESTMENT_GOALS[g]["name"] for g in goals]
             print(f"  Understood: {', '.join(goal_names)}")
-            correct = input("  Is this correct? (yes/no): ").strip().lower()
-            if correct in ["no", "n"]:
-                goals = collect_investment_goals()
+            
+            while True:
+                response = input("  Is this correct? (yes/no): ").strip()
+                result = parse_yes_no(response)
+                
+                if result is True:
+                    break  # Confirmed, move on
+                elif result is False:
+                    goals = collect_investment_goals()
+                    break
+                else:
+                    print("  [!] I'm not sure what you mean. Please answer 'yes' or 'no'.")
         
         # Step 2: Sector Selection (if not provided)
         if sectors is None:
@@ -928,10 +1064,19 @@ def run_chatbot() -> Optional[Dict]:
             # Confirm parsed values
             print("\n[Sectors to Analyze]")
             print(f"  Understood: {', '.join(sectors)} ({len(sectors)} total)")
-            correct = input("  Is this correct? (yes/no): ").strip().lower()
-            if correct in ["no", "n"]:
-                suggested_sectors = suggest_sectors_from_goals(goals)
-                sectors = collect_sector_preferences(suggested_sectors)
+            
+            while True:
+                response = input("  Is this correct? (yes/no): ").strip()
+                result = parse_yes_no(response)
+                
+                if result is True:
+                    break  # Confirmed, move on
+                elif result is False:
+                    suggested_sectors = suggest_sectors_from_goals(goals)
+                    sectors = collect_sector_preferences(suggested_sectors)
+                    break
+                else:
+                    print("  [!] I'm not sure what you mean. Please answer 'yes' or 'no'.")
         
         # Step 3: Risk Tolerance (mandatory, must be specified)
         if risk_tolerance is None:
@@ -940,9 +1085,18 @@ def run_chatbot() -> Optional[Dict]:
             # Confirm parsed value
             print("\n[Risk Tolerance]")
             print(f"  Understood: {risk_tolerance.upper()}")
-            correct = input("  Is this correct? (yes/no): ").strip().lower()
-            if correct in ["no", "n"]:
-                risk_tolerance = collect_risk_tolerance()
+            
+            while True:
+                response = input("  Is this correct? (yes/no): ").strip()
+                result = parse_yes_no(response)
+                
+                if result is True:
+                    break  # Confirmed, move on
+                elif result is False:
+                    risk_tolerance = collect_risk_tolerance()
+                    break
+                else:
+                    print("  [!] I'm not sure what you mean. Please answer 'yes' or 'no'.")
         
         # Final Confirmation
         if confirm_preferences(goals, sectors, risk_tolerance):
