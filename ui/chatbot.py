@@ -918,21 +918,81 @@ def run_chatbot() -> Optional[Dict]:
         print("  • 'I want growth in technology with medium risk'")
         print("  • 'ESG investing in healthcare and energy sectors'")
         print("  • 'Low risk defensive strategy'")
-        print("  • Type 'ideas' or 'help' to see available goal options\n")
+        print("  • Type 'ideas' or 'help' to see available goal options")
+        print("  • Type 'what sectors' to see all available sectors\n")
         
         initial_input = input("What are you looking for? ").strip()
         
-        # Check if user is asking for ideas/suggestions about goals
+        # Check if user is asking for ideas/suggestions using LLM for semantic understanding
         if initial_input:
-            asking_for_help = any(keyword in initial_input.lower() for keyword in [
+            initial_lower = initial_input.lower()
+            
+            # Basic keyword check for goals (fast path)
+            asking_for_goal_help = any(keyword in initial_lower for keyword in [
                 "ideas", "suggestions", "help", "what goals", "what options", 
                 "what can", "show me", "list goals", "available goals",
                 "don't know", "not sure", "unsure"
             ])
             
-            if asking_for_help:
+            # Use LLM to semantically detect if asking for sector information
+            asking_for_sector_help = False
+            if llm_client:
+                try:
+                    prompt = f"""Is the user asking to see available sectors or sector options?
+
+User input: "{initial_input}"
+
+Answer with ONLY "true" or "false".
+
+Examples:
+"what sectors are available" → true
+"show me sectors" → true
+"which sectors can I choose" → true
+"list all sectors" → true
+"what are my sector options" → true
+"sector ideas" → true
+"I want tech stocks" → false
+"growth investing" → false
+"help" → false
+
+Answer (true or false):"""
+
+                    response = llm_client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0,
+                        max_tokens=10
+                    )
+                    
+                    answer = response.choices[0].message.content.strip().lower()
+                    asking_for_sector_help = (answer == "true")
+                except Exception:
+                    # Fallback to keyword matching if LLM fails
+                    asking_for_sector_help = any(keyword in initial_lower for keyword in [
+                        "what sectors", "show sectors", "list sectors", "available sectors",
+                        "which sectors", "sector options"
+                    ])
+            else:
+                # No LLM available, use keyword matching
+                asking_for_sector_help = any(keyword in initial_lower for keyword in [
+                    "what sectors", "show sectors", "list sectors", "available sectors",
+                    "which sectors", "sector options"
+                ])
+            
+            if asking_for_goal_help and not asking_for_sector_help:
                 show_goal_suggestions()
-                print("\nNow that you've seen the options, let's try again!")
+                print("\nNow that you've seen the options, let's discuss your goals!")
+                continue  # Restart the loop to ask the question again
+            
+            if asking_for_sector_help:
+                print("\n" + "="*80)
+                print("AVAILABLE SECTORS")
+                print("="*80)
+                print("\nAll available sectors for analysis:\n")
+                for idx, sector in enumerate(AVAILABLE_SECTORS, 1):
+                    print(f"  {idx:2d}. {sector}")
+                print("\n" + "="*80)
+                print("\nNow that you've seen the sectors, let's discuss your goals!")
                 continue  # Restart the loop to ask the question again
         
         # Parse initial query
