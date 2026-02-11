@@ -353,10 +353,52 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
             print(f"[DEBUG] Updated risk_tolerance from parsed: {preferences['risk_tolerance']}")
         
         suggested_sectors = session.get("data", {}).get("suggested_sectors", [])
+        user_input_lower = user_input.strip().lower()
+        
+        # Check for "suggested + X" pattern
+        wants_suggested_plus = any(keyword in user_input_lower for keyword in [
+            "suggested", "suggest", "recommendation", "recommended"
+        ])
         
         # Check if sectors were already parsed from full query
-        if parsed.get("sectors"):
+        if parsed.get("sectors") and not wants_suggested_plus:
+            # Direct sector specification, use as-is
             preferences["sectors"] = parsed["sectors"]
+        elif wants_suggested_plus:
+            # User wants suggested sectors plus something else
+            # Extract what to add beyond suggested
+            additional_sectors = []
+            
+            if llm_client:
+                # Remove suggestion-related keywords to extract the additional parts
+                additional_text = user_input_lower
+                for keyword in ["suggested", "suggestions", "recommended", "recommendations"]:
+                    additional_text = additional_text.replace(keyword, "")
+                for connector in ["plus", "and", "also", "with", "add", "include"]:
+                    additional_text = additional_text.replace(connector, "")
+                
+                additional_text = additional_text.strip()
+                
+                if additional_text:
+                    # Parse the additional sectors
+                    additional_sectors = parse_sectors_with_llm(llm_client, additional_text)
+                    if additional_sectors:
+                        # Remove any that are already in suggested
+                        additional_sectors = [s for s in additional_sectors if s not in suggested_sectors]
+            
+            # Combine suggested + additional
+            if suggested_sectors:
+                combined = suggested_sectors.copy()
+                if additional_sectors:
+                    combined.extend(additional_sectors)
+                preferences["sectors"] = combined
+                print(f"[DEBUG] Combined suggested ({suggested_sectors}) + additional ({additional_sectors}) = {combined}")
+            elif additional_sectors:
+                # No suggested sectors available, just use additional
+                preferences["sectors"] = additional_sectors
+            else:
+                # Asked for suggested but no suggested available and nothing additional
+                preferences["sectors"] = suggested_sectors if suggested_sectors else []
         # Empty input with suggestions - use suggested
         elif not user_input.strip() and suggested_sectors:
             preferences["sectors"] = suggested_sectors
