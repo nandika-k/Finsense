@@ -178,6 +178,27 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
     
     # Collecting initial comprehensive input
     elif state == "collecting_initial":
+        # Check if user is asking for examples
+        user_lower = user_input.strip().lower()
+        if any(keyword in user_lower for keyword in ["example", "examples", "sample", "demo"]):
+            return {
+                "bot_message": """**Here are some example inputs:**
+
+• "I want growth in technology with medium risk"
+• "ESG investing in healthcare and energy sectors"
+• "Low risk defensive strategy"
+• "Income focused on utilities and consumer staples, low risk"
+• "Technology and financial services with high risk tolerance"
+
+**You can also type:**
+• "ideas" or "help" - see available goal options
+• "what sectors" - see all available sectors
+
+Now, what are you looking for?""",
+                "state": "collecting_initial",
+                "data": {}
+            }
+        
         parsed = parse_initial_query(user_input)
         
         # Check if clarification is needed
@@ -573,18 +594,6 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
 def get_welcome_message() -> str:
     """Get initial welcome message"""
     return """Welcome! I'll help you identify sectors and stocks worth researching based on your investment goals and risk tolerance.
-
-Let's start by understanding your investment preferences...
-
-**TELL ME ABOUT YOUR INVESTMENT INTERESTS**
-
-You can tell me everything at once, or we'll go step-by-step.
-
-**Examples:**
-• "I want growth in technology with medium risk"
-• "ESG investing in healthcare and energy sectors"  
-• "Low risk defensive strategy"
-• Type "ideas" or "help" to see available goal options
 
 What are you looking for?"""
 

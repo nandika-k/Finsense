@@ -607,17 +607,12 @@ def collect_sector_preferences(suggested_sectors: List[str]) -> List[str]:
         marker = " (suggested)" if sector in suggested_sectors else ""
         print(f"  {idx:2d}. {sector}{marker}")
     
-    print("\nHow to select:")
     if llm_client:
         print("  ✓ Natural language - describe any way you want:")
         print("    'tech and pharma' / 'banks' / 'renewable energy and EVs'")
         print("    'defensive stocks' / 'growth sectors' / 'all but energy'")
         if suggested_sectors:
             print("  ✓ Build on suggestions: 'suggested plus energy and materials'")
-    print("  ✓ Numbers: '1,2,5' or just '1'")
-    print("  ✓ Type 'all' for all sectors")
-    if suggested_sectors:
-        print("  ✓ Press Enter to use suggested sectors")
     
     while True:
         response = input("\nYour choice: ").strip()
@@ -916,22 +911,28 @@ def run_chatbot() -> Optional[Dict]:
     # Conversation loop (allow restart if user rejects confirmation)
     while True:
         # Start with open-ended question
-        print("\n" + "="*80)
-        print("TELL ME ABOUT YOUR INVESTMENT INTERESTS")
-        print("="*80)
-        print("\nYou can tell me everything at once, or we'll go step-by-step.")
-        print("\nExamples:")
-        print("  • 'I want growth in technology with medium risk'")
-        print("  • 'ESG investing in healthcare and energy sectors'")
-        print("  • 'Low risk defensive strategy'")
-        print("  • Type 'ideas' or 'help' to see available goal options")
-        print("  • Type 'what sectors' to see all available sectors\n")
-        
         initial_input = input("What are you looking for? ").strip()
         
         # Check if user is asking for ideas/suggestions using LLM for semantic understanding
         if initial_input:
             initial_lower = initial_input.lower()
+            
+            # Check if asking for examples
+            if any(keyword in initial_lower for keyword in ["example", "sample", "show me example", "demo"]):
+                print("\n" + "="*80)
+                print("EXAMPLE INPUTS")
+                print("="*80)
+                print("\nHere are some example inputs you can try:\n")
+                print("  • 'I want growth in technology with medium risk'")
+                print("  • 'ESG investing in healthcare and energy sectors'")
+                print("  • 'Low risk defensive strategy'")
+                print("  • 'Income focused on utilities and consumer staples, low risk'")
+                print("  • 'Technology and financial services with high risk tolerance'")
+                print("\nYou can also ask for:")
+                print("  • 'ideas' or 'help' - see available goal options")
+                print("  • 'what sectors' - see all available sectors")
+                print("="*80)
+                continue  # Restart the loop to ask the question again
             
             # Basic keyword check for goals (fast path)
             asking_for_goal_help = any(keyword in initial_lower for keyword in [
