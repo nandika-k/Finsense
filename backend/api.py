@@ -201,21 +201,26 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
         # DEBUG: Log current preferences state
         print(f"[DEBUG] After parsing - preferences: goals={preferences.get('goals')}, sectors={preferences.get('sectors')}, risk={preferences.get('risk_tolerance')}")
         
-        # Show what was understood
-        understood = []
+        # Build natural acknowledgment message
+        understood_parts = []
         if preferences.get("goals"):
             goal_names = [INVESTMENT_GOALS[g]["name"] for g in preferences["goals"]]
-            understood.append(f"Goals: {', '.join(goal_names)}")
+            understood_parts.append(', '.join(goal_names))
         if preferences.get("sectors"):
-            understood.append(f"Sectors: {', '.join(preferences['sectors'])}")
+            sector_text = ', '.join(preferences['sectors'])
+            if understood_parts:
+                understood_parts.append(f"in the {sector_text} {'sector' if len(preferences['sectors']) == 1 else 'sectors'}")
+            else:
+                understood_parts.append(f"the {sector_text} {'sector' if len(preferences['sectors']) == 1 else 'sectors'}")
         if preferences.get("risk_tolerance"):
-            understood.append(f"Risk: {preferences['risk_tolerance'].upper()}")
+            risk_text = f"with {preferences['risk_tolerance']} risk tolerance"
+            understood_parts.append(risk_text)
         
-        understood_text = "\n".join([f"• {item}" for item in understood]) if understood else ""
+        acknowledged = " ".join(understood_parts) if understood_parts else ""
         
         # If clarification needed AND nothing was understood, ask for clarification and stay in initial
         # If something was understood, proceed to ask for missing pieces
-        if parsed.get("needs_clarification") and not understood_text:
+        if parsed.get("needs_clarification") and not acknowledged:
             return {
                 "bot_message": parsed.get("clarification_message", "Could you provide more details about your investment preferences?"),
                 "state": "collecting_initial",
@@ -225,7 +230,7 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
         # Determine what to ask next
         if not preferences.get("goals"):
             goals_q = format_goals_question(parsed)
-            message = f"✓ Understood:\n{understood_text}\n\n{goals_q}" if understood_text else goals_q
+            message = f"Great! I can see you're interested in {acknowledged}.\n\n{goals_q}" if acknowledged else goals_q
             return {
                 "bot_message": message,
                 "state": "collecting_goals",
@@ -234,7 +239,7 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
         elif not preferences.get("sectors"):
             suggested = suggest_sectors_from_goals(preferences["goals"])
             sectors_q = format_sectors_question(preferences["goals"], suggested)
-            message = f"✓ Understood:\n{understood_text}\n\n→ What about sectors?\n\n{sectors_q}" if understood_text else sectors_q
+            message = f"Great! I can see you're interested in {acknowledged}.\n\n{sectors_q}" if acknowledged else sectors_q
             print(f"[DEBUG] Returning sectors question. Message length: {len(message)}")
             print(f"[DEBUG] Message preview: {message[:200]}...")
             return {
@@ -244,7 +249,7 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
             }
         elif not preferences.get("risk_tolerance"):
             risk_q = format_risk_question()
-            message = f"✓ Understood:\n{understood_text}\n\n→ What about risk tolerance?\n\n{risk_q}" if understood_text else risk_q
+            message = f"Great! I can see you're interested in {acknowledged}.\n\n{risk_q}" if acknowledged else risk_q
             return {
                 "bot_message": message,
                 "state": "collecting_risk",
@@ -322,15 +327,22 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
                 }
         
         # Determine what to ask next based on what's still missing
+        # Create acknowledgment for goals
+        if preferences["goals"]:
+            goal_names = [INVESTMENT_GOALS[g]["name"] for g in preferences["goals"]]
+            acknowledgment = f"Great! You're interested in **{', '.join(goal_names)}**.\n\n"
+        else:
+            acknowledgment = "Great! Let's explore some investment opportunities.\n\n"
+        
         if not preferences.get("sectors"):
             return {
-                "bot_message": format_sectors_question(preferences["goals"], suggested_sectors),
+                "bot_message": acknowledgment + format_sectors_question(preferences["goals"], suggested_sectors),
                 "state": "collecting_sectors",
                 "data": {"suggested_sectors": suggested_sectors}
             }
         elif not preferences.get("risk_tolerance"):
             return {
-                "bot_message": format_risk_question(),
+                "bot_message": acknowledgment + format_risk_question(),
                 "state": "collecting_risk",
                 "data": {}
             }
@@ -447,10 +459,17 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
         print(f"[DEBUG] Before final check - risk_tolerance value: '{risk_value}', type: {type(risk_value)}, bool: {bool(risk_value)}")
         print(f"[DEBUG] Full preferences dict: {preferences}")
         
+        # Create acknowledgment for sectors
+        if preferences.get("sectors"):
+            sector_list = ', '.join(preferences["sectors"])
+            acknowledgment = f"Perfect! You're interested in **{sector_list}**.\n\n"
+        else:
+            acknowledgment = ""
+        
         if not risk_value or risk_value not in ["low", "medium", "high"]:
             print(f"[DEBUG] Risk tolerance is missing or invalid, asking for it")
             return {
-                "bot_message": format_risk_question(),
+                "bot_message": acknowledgment + format_risk_question(),
                 "state": "collecting_risk",
                 "data": {}
             }
@@ -506,9 +525,13 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
                     "data": {}
                 }
         
+        # Create acknowledgment for risk tolerance
+        risk_level = preferences.get("risk_tolerance", "medium")
+        acknowledgment = f"Got it! You have a **{risk_level}** risk tolerance.\n\n"
+        
         # Move to confirmation
         return {
-            "bot_message": format_confirmation(preferences),
+            "bot_message": acknowledgment + format_confirmation(preferences),
             "state": "confirming",
             "data": {}
         }
