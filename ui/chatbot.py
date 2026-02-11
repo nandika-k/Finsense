@@ -946,11 +946,14 @@ def run_chatbot() -> Optional[Dict]:
             
             # Show what was understood
             understood = []
+            
             if goals:
                 goal_names = [INVESTMENT_GOALS[g]["name"] for g in goals]
                 understood.append(f"Goals: {', '.join(goal_names)}")
+            
             if sectors:
                 understood.append(f"Sectors: {', '.join(sectors)}")
+            
             if risk_tolerance:
                 understood.append(f"Risk: {risk_tolerance.upper()}")
             
@@ -958,6 +961,12 @@ def run_chatbot() -> Optional[Dict]:
                 print("\n  ✓ Understood:")
                 for item in understood:
                     print(f"    • {item}")
+                
+                # If incomplete, ask again (goals can be None initially, that's ok - exploratory mode)
+                all_complete = (sectors is not None and risk_tolerance is not None)
+                if not all_complete:
+                    #print("\n  → Please provide the remaining information.")
+                    continue  # Loop back to ask again
         else:
             goals = None
             sectors = None
