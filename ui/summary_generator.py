@@ -189,10 +189,18 @@ Instructions:
                         break
                     summary += f"<div style='margin: 8px 0; padding-left: 12px;'>"
                     summary += f"<strong>[{sector.upper()}]</strong> {article['title']}<br>"
+                    
                     if article.get('related_risk'):
                         summary += f"<em>Risk: {article['related_risk']}</em><br>"
+                    
+                    # Make source a clickable link with confirmation popup
                     if article.get('source'):
-                        summary += f"<small>Source: {article['source']}</small>"
+                        source = article['source']
+                        if source.startswith('http://') or source.startswith('https://'):
+                            summary += f"<small>Source: <a href='{source}' target='_blank' onclick='return confirm(\"You are about to visit an external website. Continue?\");'>{source}</a></small>"
+                        else:
+                            summary += f"<small>Source: {source}</small>"
+                    
                     summary += "</div>"
                     article_count += 1
                 if article_count >= 8:
