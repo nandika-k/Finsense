@@ -1,6 +1,9 @@
 // Chatbot UI Script with FastAPI Backend Integration
 
-const API_BASE_URL = 'https://finsense-ktp7.onrender.com'; 
+// Use local backend for development, deployed backend for production
+const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+    ? 'http://localhost:8000' 
+    : 'https://finsense-ktp7.onrender.com'; 
 
 class ChatbotUI {
     constructor() {

@@ -907,6 +907,12 @@ def run_chatbot() -> Optional[Dict]:
     
     llm_client = get_llm_client()
     
+    # Initialize state variables OUTSIDE loop to persist across iterations
+    goals = None
+    sectors = None
+    risk_tolerance = None
+    shown_understood = False  # Track if we've shown what we understood
+    
     # Conversation loop (allow restart if user rejects confirmation)
     while True:
         # Start with open-ended question
@@ -936,6 +942,7 @@ def run_chatbot() -> Optional[Dict]:
             
             # Use LLM to semantically detect if asking for sector information
             asking_for_sector_help = False
+            asking_what_needed = False
             if llm_client:
                 try:
                     prompt = f"""Is the user asking to see available sectors or sector options?
@@ -951,6 +958,8 @@ Examples:
 "list all sectors" → true
 "what are my sector options" → true
 "sector ideas" → true
+"suggested sectors" → true
+"what sectors do you suggest" → true
 "I want tech stocks" → false
 "growth investing" → false
 "help" → false
@@ -966,11 +975,41 @@ Answer (true or false):"""
                     
                     answer = response.choices[0].message.content.strip().lower()
                     asking_for_sector_help = (answer == "true")
+                    
+                    # Also check if asking what information is needed
+                    if not asking_for_sector_help:
+                        prompt2 = f"""Is the user asking what information you need or what else is required?
+
+User input: "{initial_input}"
+
+Answer with ONLY "true" or "false".
+
+Examples:
+"what else do you need" → true
+"what else do you need to know" → true
+"what information do you need" → true
+"what's missing" → true
+"what do you need from me" → true
+"anything else" → true
+"esg low risk" → false
+"technology" → false
+
+Answer (true or false):"""
+                        resp2 = llm_client.chat.completions.create(
+                            model="llama-3.3-70b-versatile",
+                            messages=[{"role": "user", "content": prompt2}],
+                            temperature=0,
+                            max_tokens=10
+                        )
+                        asking_what_needed = (resp2.choices[0].message.content.strip().lower() == "true")
                 except Exception:
                     # Fallback to keyword matching if LLM fails
                     asking_for_sector_help = any(keyword in initial_lower for keyword in [
                         "what sectors", "show sectors", "list sectors", "available sectors",
                         "which sectors", "sector options"
+                    ])
+                    asking_what_needed = any(keyword in initial_lower for keyword in [
+                        "what else", "what do you need", "what information", "what's missing"
                     ])
             else:
                 # No LLM available, use keyword matching
@@ -984,6 +1023,20 @@ Answer (true or false):"""
                 print("\nNow that you've seen the options, let's discuss your goals!")
                 continue  # Restart the loop to ask the question again
             
+            if asking_what_needed:
+                # User is asking what info is needed - tell them specifically
+                missing = []
+                if sectors is None:
+                    missing.append("which sectors to analyze")
+                if risk_tolerance is None:
+                    missing.append("your risk tolerance (low/medium/high)")
+                
+                if missing:
+                    print(f"\n  → I still need to know: {' and '.join(missing)}")
+                else:
+                    print("\n  → I have all the information I need! Let me confirm...")
+                continue
+            
             if asking_for_sector_help:
                 print("\n" + "="*80)
                 print("AVAILABLE SECTORS")
@@ -991,8 +1044,15 @@ Answer (true or false):"""
                 print("\nAll available sectors for analysis:\n")
                 for idx, sector in enumerate(AVAILABLE_SECTORS, 1):
                     print(f"  {idx:2d}. {sector}")
+                
+                # Show suggested sectors if goals are known
+                if goals:
+                    suggested = suggest_sectors_from_goals(goals)
+                    if suggested:
+                        print(f"\n  💡 Based on your goals, I suggest: {', '.join(suggested)}")
+                
                 print("\n" + "="*80)
-                print("\nNow that you've seen the sectors, let's discuss your goals!")
+                print("\nNow tell me which sectors you'd like to analyze!")
                 continue  # Restart the loop to ask the question again
         
         # Parse initial query
@@ -1000,37 +1060,65 @@ Answer (true or false):"""
             print("\n  Analyzing your request...")
             parsed = parse_initial_query(initial_input)
             
-            goals = parsed.get("goals")
-            sectors = parsed.get("sectors")
-            risk_tolerance = parsed.get("risk_tolerance")
+            # Incrementally update state (don't replace, merge)
+            if parsed.get("goals"):
+                goals = parsed.get("goals")
+            if parsed.get("sectors"):
+                sectors = parsed.get("sectors")
+            if parsed.get("risk_tolerance"):
+                risk_tolerance = parsed.get("risk_tolerance")
             
-            # Show what was understood
+            # Show what was understood from THIS input
             understood = []
             
-            if goals:
-                goal_names = [INVESTMENT_GOALS[g]["name"] for g in goals]
+            if parsed.get("goals"):
+                goal_names = [INVESTMENT_GOALS[g]["name"] for g in parsed.get("goals")]
                 understood.append(f"Goals: {', '.join(goal_names)}")
             
-            if sectors:
-                understood.append(f"Sectors: {', '.join(sectors)}")
+            if parsed.get("sectors"):
+                understood.append(f"Sectors: {', '.join(parsed.get('sectors'))}")
             
-            if risk_tolerance:
-                understood.append(f"Risk: {risk_tolerance.upper()}")
+            if parsed.get("risk_tolerance"):
+                understood.append(f"Risk: {parsed.get('risk_tolerance').upper()}")
             
             if understood:
                 print("\n  ✓ Understood:")
                 for item in understood:
                     print(f"    • {item}")
+                shown_understood = True  # Mark that we've shown info
                 
-                # If incomplete, ask again (goals can be None initially, that's ok - exploratory mode)
+                # If incomplete, prompt for what's missing instead of looping
                 all_complete = (sectors is not None and risk_tolerance is not None)
                 if not all_complete:
-                    #print("\n  → Please provide the remaining information.")
-                    continue  # Loop back to ask again
-        else:
-            goals = None
-            sectors = None
-            risk_tolerance = None
+                    missing = []
+                    if sectors is None:
+                        missing.append("sectors")
+                    if risk_tolerance is None:
+                        missing.append("risk tolerance")
+                    
+                    if missing:
+                        print(f"\n  → What about {' and '.join(missing)}?")
+                    continue  # Ask again for remaining info
+            else:
+                # Nothing understood from this input - check if it's an affirmative
+                if shown_understood and initial_lower in ["yes", "y", "yep", "yeah", "yea", "ok", "okay", "correct", "right"]:
+                    # User is confirming what we showed before - check if we have everything
+                    if sectors is not None and risk_tolerance is not None:
+                        break  # We have everything, proceed to confirmation
+                    else:
+                        # Still missing something
+                        missing = []
+                        if sectors is None:
+                            missing.append("sectors")
+                        if risk_tolerance is None:
+                            missing.append("risk tolerance")
+                        print(f"\n  → I still need to know your {' and '.join(missing)}.")
+                        continue
+                # Otherwise, couldn't parse - will loop back to ask again
+        
+        # If we have everything from parsing, proceed to final confirmation
+        if sectors is not None and risk_tolerance is not None:
+            break  # Exit the initial question loop, skip step-by-step
         
         # Ask follow-up questions for missing information
         print("\n" + "-"*80)

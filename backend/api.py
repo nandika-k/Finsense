@@ -213,43 +213,40 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
         
         understood_text = "\n".join([f"• {item}" for item in understood]) if understood else ""
         
-        # If clarification needed but some info was gathered, ask for missing parts
-        if parsed.get("needs_clarification") and understood_text:
+        # If clarification needed AND nothing was understood, ask for clarification and stay in initial
+        # If something was understood, proceed to ask for missing pieces
+        if parsed.get("needs_clarification") and not understood_text:
             return {
-                "bot_message": (
-                    f"✓ Understood:\n{understood_text}\n\n"
-                    f"{parsed.get('clarification_message', 'What else would you like to specify?')}"
-                ),
+                "bot_message": parsed.get("clarification_message", "Could you provide more details about your investment preferences?"),
                 "state": "collecting_initial",
                 "data": {}
             }
         
         # Determine what to ask next
         if not preferences.get("goals"):
+            goals_q = format_goals_question(parsed)
+            message = f"✓ Understood:\n{understood_text}\n\n{goals_q}" if understood_text else goals_q
             return {
-                "bot_message": (
-                    f"{'✓ Understood:\n' + understood_text if understood_text else ''}\n\n"
-                    f"{format_goals_question(parsed)}"
-                ),
+                "bot_message": message,
                 "state": "collecting_goals",
                 "data": {}
             }
         elif not preferences.get("sectors"):
             suggested = suggest_sectors_from_goals(preferences["goals"])
+            sectors_q = format_sectors_question(preferences["goals"], suggested)
+            message = f"✓ Understood:\n{understood_text}\n\n→ What about sectors?\n\n{sectors_q}" if understood_text else sectors_q
+            print(f"[DEBUG] Returning sectors question. Message length: {len(message)}")
+            print(f"[DEBUG] Message preview: {message[:200]}...")
             return {
-                "bot_message": (
-                    f"✓ Understood:\n{understood_text}\n\n"
-                    f"{format_sectors_question(preferences['goals'], suggested)}"
-                ),
+                "bot_message": message,
                 "state": "collecting_sectors",
                 "data": {"suggested_sectors": suggested}
             }
         elif not preferences.get("risk_tolerance"):
+            risk_q = format_risk_question()
+            message = f"✓ Understood:\n{understood_text}\n\n→ What about risk tolerance?\n\n{risk_q}" if understood_text else risk_q
             return {
-                "bot_message": (
-                    f"✓ Understood:\n{understood_text}\n\n"
-                    f"{format_risk_question()}"
-                ),
+                "bot_message": message,
                 "state": "collecting_risk",
                 "data": {}
             }
@@ -785,6 +782,10 @@ async def chat(request: ChatMessage):
     
     # Process message based on state
     response_data = get_llm_response(request.message, "", session)
+    
+    # DEBUG: Log the response before returning
+    print(f"[DEBUG ENDPOINT] Response data: state={response_data.get('state')}, bot_message length={len(response_data.get('bot_message', ''))}")
+    print(f"[DEBUG ENDPOINT] bot_message preview: {response_data.get('bot_message', '')[:200]}")
     
     # Update session state
     session["state"] = response_data["state"]
