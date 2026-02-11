@@ -9,7 +9,7 @@ from datetime import datetime
 import os
 
 # Your Render deployment URL
-RENDER_URL = os.getenv("RENDER_URL", "https://finsense-web.vercel.app/")
+RENDER_URL = os.getenv("RENDER_URL", "https://finsense-ktp7.onrender.com")
 PING_INTERVAL = 14 * 60  # 14 minutes in seconds
 
 def ping_server():
