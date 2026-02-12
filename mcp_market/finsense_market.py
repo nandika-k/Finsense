@@ -495,7 +495,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         "volatility": f"{volatility:.2f}%",
                         "volatility_numeric": volatility,  # Keep numeric for sorting
                         "market_cap": info.get("marketCap", 0),
-                        "dividend_yield": info.get("dividendYield", 0) * 100 if info.get("dividendYield") else 0,
+                        "dividend_yield": info.get("dividendYield", 0) if info.get("dividendYield") else 0,
                         "pe_ratio": info.get("trailingPE", 0),
                         "esg_score": 70 if is_esg_qualified else 0  # Binary: qualified=70, not=0
                     }
