@@ -19,6 +19,7 @@ from agent.conversation_manager import ConversationManager, UserPreferences
 from agent.intent_classifier import IntentClassification, IntentClassifier, IntentType
 from agent.preference_collector import PreferenceCollector
 from agent.response_formatter import ResponseFormatter
+from agent.tool_optimizer import ToolOptimizer
 from agent.tool_router import ToolCall, ToolRouter
 
 
@@ -31,6 +32,7 @@ class ConversationalAgent:
         intent_classifier: Optional[IntentClassifier] = None,
         preference_collector: Optional[PreferenceCollector] = None,
         tool_router: Optional[ToolRouter] = None,
+        tool_optimizer: Optional[ToolOptimizer] = None,
         response_formatter: Optional[ResponseFormatter] = None,
         context_builder: Optional[ContextBuilder] = None,
         coordinator: Optional[FinsenseCoordinator] = None,
@@ -39,6 +41,7 @@ class ConversationalAgent:
         self.intent_classifier = intent_classifier or IntentClassifier()
         self.preference_collector = preference_collector or PreferenceCollector()
         self.tool_router = tool_router or ToolRouter()
+        self.tool_optimizer = tool_optimizer or ToolOptimizer()
         self.response_formatter = response_formatter or ResponseFormatter()
         self.context_builder = context_builder or ContextBuilder()
         self.coordinator = coordinator or FinsenseCoordinator()
@@ -170,19 +173,17 @@ class ConversationalAgent:
 
     async def _execute_tool_calls(self, tool_calls: List[ToolCall]) -> Dict[str, Any]:
         """Execute routed tool calls through coordinator methods."""
-        results: Dict[str, Any] = {}
-        for call in tool_calls:
+        async def invoke(call: ToolCall) -> Dict[str, Any] | Any:
             method = getattr(self.coordinator, call.tool_name, None)
             if method is None:
-                results[call.tool_name] = {"error": f"Coordinator missing tool method: {call.tool_name}"}
-                continue
+                return {"error": f"Coordinator missing tool method: {call.tool_name}"}
 
             try:
-                results[call.tool_name] = await method(**call.arguments)
+                return await method(**call.arguments)
             except Exception as exc:
-                results[call.tool_name] = {"error": str(exc)}
+                return {"error": str(exc)}
 
-        return results
+        return await self.tool_optimizer.execute_tool_calls(tool_calls, invoke)
 
     def _format_tool_results(
         self,
