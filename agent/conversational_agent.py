@@ -11,9 +11,11 @@ Main orchestrator for chat-mode interactions:
 
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List, Optional
 
 from agent.agent import FinsenseCoordinator
+from agent.analytics import ConversationAnalytics
 from agent.context_builder import ContextBuilder
 from agent.conversation_manager import ConversationManager, UserPreferences
 from agent.intent_classifier import IntentClassification, IntentClassifier, IntentType
@@ -36,6 +38,7 @@ class ConversationalAgent:
         response_formatter: Optional[ResponseFormatter] = None,
         context_builder: Optional[ContextBuilder] = None,
         coordinator: Optional[FinsenseCoordinator] = None,
+        analytics: Optional[ConversationAnalytics] = None,
     ):
         self.conversation_manager = conversation_manager or ConversationManager()
         self.intent_classifier = intent_classifier or IntentClassifier()
@@ -45,8 +48,12 @@ class ConversationalAgent:
         self.response_formatter = response_formatter or ResponseFormatter()
         self.context_builder = context_builder or ContextBuilder()
         self.coordinator = coordinator or FinsenseCoordinator()
+        self.analytics = analytics or ConversationAnalytics(
+            session_id=getattr(self.conversation_manager, "session_id", None)
+        )
 
         self._initialized = False
+        self._active_query_index: Optional[int] = None
 
     async def initialize(self) -> None:
         """Initialize tool coordinator connections."""
@@ -63,6 +70,8 @@ class ConversationalAgent:
 
     async def process_message(self, user_message: str) -> str:
         """Process one user message and return assistant response."""
+        start = time.perf_counter()
+        self._active_query_index = self.analytics.start_query()
         self.conversation_manager.add_user_message(user_message)
 
         try:
@@ -76,6 +85,7 @@ class ConversationalAgent:
                 user_message,
                 conversation_context=context_window,
             )
+            self.analytics.record_intent(self._active_query_index, classification.intent_type.value)
 
             response = await self._handle_classified_message(classification)
 
@@ -101,6 +111,14 @@ class ConversationalAgent:
                 metadata={"intent": "error", "error": str(exc)},
             )
             return error_response
+        finally:
+            elapsed_ms = (time.perf_counter() - start) * 1000.0
+            self.analytics.record_response_time(self._active_query_index, elapsed_ms)
+            user_turns = sum(
+                1 for message in self.conversation_manager.get_full_history() if message.role == "user"
+            )
+            self.analytics.record_conversation_length(user_turns)
+            self._active_query_index = None
 
     async def _handle_classified_message(self, classification: IntentClassification) -> str:
         """Handle intent-specific paths before/after tool execution."""
@@ -131,8 +149,10 @@ class ConversationalAgent:
 
         current_preferences = self.conversation_manager.get_preferences()
         if classification.requires_preferences:
+            self.analytics.record_preference_collection(self._active_query_index, required=True, success=None)
             missing = self.preference_collector.check_required_preferences(current_preferences)
             if missing:
+                self.analytics.record_preference_collection(self._active_query_index, required=True, success=False)
                 question = self.preference_collector.generate_preference_question(missing)
                 return self.response_formatter.format_clarification_prompt(question)
 
@@ -142,6 +162,7 @@ class ConversationalAgent:
         )
 
         if not tool_calls:
+            self.analytics.record_tool_calls(self._active_query_index, 0)
             return "I understood your request, but there is no tool action mapped for it yet."
 
         tool_results = await self._execute_tool_calls(tool_calls)
@@ -161,18 +182,23 @@ class ConversationalAgent:
         )
 
         if outcome["validation_errors"]:
+            self.analytics.record_preference_collection(self._active_query_index, required=True, success=False)
             return self.response_formatter.format_error_message(
                 "; ".join(outcome["validation_errors"])
             )
 
         if outcome["is_complete"]:
+            self.analytics.record_preference_collection(self._active_query_index, required=True, success=True)
             return "Preferences updated successfully. " + self._format_preferences_view(updated)
 
+        self.analytics.record_preference_collection(self._active_query_index, required=True, success=False)
         next_question = outcome.get("next_question") or "Could you share a bit more preference detail?"
         return self.response_formatter.format_clarification_prompt(next_question)
 
     async def _execute_tool_calls(self, tool_calls: List[ToolCall]) -> Dict[str, Any]:
         """Execute routed tool calls through coordinator methods."""
+        self.analytics.record_tool_calls(self._active_query_index, len(tool_calls))
+
         async def invoke(call: ToolCall) -> Dict[str, Any] | Any:
             method = getattr(self.coordinator, call.tool_name, None)
             if method is None:
@@ -184,6 +210,22 @@ class ConversationalAgent:
                 return {"error": str(exc)}
 
         return await self.tool_optimizer.execute_tool_calls(tool_calls, invoke)
+
+    def get_analytics_summary(self) -> Dict[str, Any]:
+        """Get analytics summary for the current conversation session."""
+        return self.analytics.generate_summary()
+
+    def export_analytics_json(self, file_path: str) -> str:
+        """Export analytics payload to JSON and return path."""
+        return str(self.analytics.export_json(file_path))
+
+    def export_analytics_csv(self, file_path: str) -> str:
+        """Export query-level analytics to CSV and return path."""
+        return str(self.analytics.export_csv(file_path))
+
+    def get_basic_analytics_visualization(self) -> str:
+        """Get text-based analytics visualization."""
+        return self.analytics.create_basic_visualization()
 
     def _format_tool_results(
         self,
