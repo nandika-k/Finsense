@@ -11,6 +11,8 @@ Uses Groq LLM for semantic understanding of natural language inputs.
 
 import os
 import json
+import re
+from difflib import get_close_matches
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
 
@@ -85,6 +87,120 @@ INVESTMENT_GOALS = {
 RISK_TOLERANCE_LEVELS = ["low", "medium", "high"]
 
 
+def _extract_json_object(raw_text: str) -> Optional[Dict[str, Any]]:
+    """Extract and parse the first JSON object from model output."""
+    text = (raw_text or "").strip()
+    if not text:
+        return None
+
+    if text.startswith("```"):
+        lines = text.split("\n")
+        text = "\n".join(lines[1:-1]).strip()
+    if text.startswith("json"):
+        text = text[4:].strip()
+
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    match = re.search(r"\{[\s\S]*\}", text)
+    if not match:
+        return None
+
+    try:
+        parsed = json.loads(match.group(0))
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
+def _parse_initial_query_rule_based(user_input: str) -> Dict[str, Any]:
+    """Best-effort parser when LLM is unavailable or parsing fails."""
+    text = (user_input or "").strip().lower()
+    tokens = re.findall(r"[a-z\-]+", text)
+
+    goal_aliases = {
+        "growth": ["growth", "grow", "momentum"],
+        "income": ["income", "dividend", "yield", "cashflow"],
+        "esg": ["esg", "sustainable", "environment", "ethical"],
+        "value": ["value", "undervalued"],
+        "defensive": ["defensive", "safe", "stability", "stable"],
+        "diversified": ["diversified", "diversification", "balanced", "broad"],
+    }
+
+    sector_aliases = {
+        "technology": ["technology", "tech"],
+        "healthcare": ["healthcare", "health care", "health"],
+        "financial-services": ["financial", "finance", "financial services", "bank"],
+        "energy": ["energy", "oil", "gas"],
+        "consumer": ["consumer"],
+        "consumer-discretionary": ["consumer discretionary", "discretionary"],
+        "consumer-staples": ["consumer staples", "staples"],
+        "utilities": ["utilities", "utility"],
+        "real-estate": ["real estate", "real-estate", "reit"],
+        "industrials": ["industrials", "industrial"],
+        "materials": ["materials", "material"],
+        "communication-services": ["communication services", "communications", "telecom"],
+    }
+
+    goals = []
+    for goal, aliases in goal_aliases.items():
+        if any(alias in text for alias in aliases):
+            goals.append(goal)
+
+    # Fuzzy goal detection for common typos (e.g., "grwoth" -> "growth")
+    canonical_goals = list(goal_aliases.keys())
+    for token in tokens:
+        close = get_close_matches(token, canonical_goals, n=1, cutoff=0.8)
+        if close and close[0] not in goals:
+            goals.append(close[0])
+
+    sectors = []
+    for sector, aliases in sector_aliases.items():
+        if any(alias in text for alias in aliases):
+            sectors.append(sector)
+
+    risk_tolerance = None
+    if re.search(r"\blow\b|\bconservative\b|\bsafe\b", text):
+        risk_tolerance = "low"
+    elif re.search(r"\bmedium\b|\bmoderate\b|\bbalanced\b", text):
+        risk_tolerance = "medium"
+    elif re.search(r"\bhigh\b|\baggressive\b", text):
+        risk_tolerance = "high"
+
+    result = {
+        "goals": goals or None,
+        "sectors": sectors or None,
+        "risk_tolerance": risk_tolerance,
+        "needs_clarification": False,
+        "clarification_message": None,
+        "confidence": "medium",
+    }
+
+    stock_intent = bool(
+        re.search(r"\bstock\b|\bstocks\b|\bshares\b|\bpicks\b", text)
+    )
+
+    if not (result["goals"] or result["sectors"] or result["risk_tolerance"]):
+        result["needs_clarification"] = True
+        if stock_intent:
+            result["clarification_message"] = (
+                "Got it — you want stock ideas. Tell me either a goal "
+                "(growth, income, ESG, value) or a sector (like technology or healthcare), "
+                "and optionally your risk tolerance (low/medium/high)."
+            )
+        else:
+            result["clarification_message"] = (
+                "I can help with goals, sectors, and risk tolerance. "
+                "For example: 'growth in technology with medium risk'."
+            )
+        result["confidence"] = "low"
+
+    return result
+
+
 def parse_initial_query(user_input: str) -> Dict[str, Any]:
     """
     Parse an initial open-ended query for goals, sectors, and risk tolerance using LLM.
@@ -100,15 +216,7 @@ def parse_initial_query(user_input: str) -> Dict[str, Any]:
     llm_client = get_llm_client()
 
     if not llm_client:
-        # Fallback: return needs clarification
-        return {
-            "goals": None,
-            "sectors": None,
-            "risk_tolerance": None,
-            "needs_clarification": True,
-            "clarification_message": "I'd be happy to help! Could you tell me about your investment goals, preferred sectors, or risk tolerance?",
-            "confidence": "low",
-        }
+        return _parse_initial_query_rule_based(user_input)
 
     # Use LLM for comprehensive parsing with confidence assessment
     try:
@@ -158,24 +266,16 @@ Result: {{"goals": null, "sectors": null, "risk_tolerance": null, "confidence": 
 
 JSON object:"""
 
-        response = llm_client.chat.completions.create(
+        from agent.llm_utils import call_llm
+        content = call_llm(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             max_tokens=400,
         )
-
-        content = response.choices[0].message.content.strip()
-
-        # Remove markdown code blocks
-        if content.startswith("```"):
-            lines = content.split("\n")
-            content = "\n".join(lines[1:-1]).strip()
-
-        if content.startswith("json"):
-            content = content[4:].strip()
-
-        parsed = json.loads(content)
+        parsed = _extract_json_object(content)
+        if not parsed:
+            return _parse_initial_query_rule_based(user_input)
 
         # Validate and clean the parsed data
         result = {
@@ -201,19 +301,17 @@ JSON object:"""
         if parsed.get("risk_tolerance") in ["low", "medium", "high"]:
             result["risk_tolerance"] = parsed["risk_tolerance"]
 
+        if result["goals"] or result["sectors"] or result["risk_tolerance"]:
+            result["needs_clarification"] = False
+            if not result["clarification_message"]:
+                result["clarification_message"] = None
+
         return result
 
     except Exception as e:
         if os.getenv("DEBUG_CHATBOT"):
             print(f"[DEBUG] LLM parsing error: {e}")
-        return {
-            "goals": None,
-            "sectors": None,
-            "risk_tolerance": None,
-            "needs_clarification": True,
-            "clarification_message": "I didn't quite catch that. Could you tell me more about what you're looking for?",
-            "confidence": "low",
-        }
+        return _parse_initial_query_rule_based(user_input)
 
 
 def detect_user_intent(client: Any, user_input: str, context: str) -> str:
@@ -244,14 +342,13 @@ Classify as ONE of these intents:
 
 Return ONLY the intent word, nothing else."""
 
-        response = client.chat.completions.create(
+        from agent.llm_utils import call_llm
+        intent = call_llm(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             max_tokens=10,
-        )
-
-        intent = response.choices[0].message.content.strip().lower()
+        ).lower()
 
         # Validate response
         if intent in ["delegate", "specify", "help", "unclear"]:
@@ -265,19 +362,10 @@ Return ONLY the intent word, nothing else."""
         return "unclear"
 
 
-def get_llm_client() -> Optional[Any]:
-    """Get Groq client if API key is available"""
-    if not HAS_GROQ:
-        return None
-
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        return None
-
-    try:
-        return Groq(api_key=api_key)
-    except Exception:
-        return None
+def get_llm_client() -> bool:
+    """Return True if any LLM client is available"""
+    from agent.llm_utils import get_groq_client, get_fallback_client
+    return get_groq_client() is not None or get_fallback_client() is not None
 
 
 def parse_sectors_with_llm(client: Any, user_input: str) -> Optional[List[str]]:
@@ -336,14 +424,13 @@ Examples:
 
 JSON array:"""
 
-        response = client.chat.completions.create(
+        from agent.llm_utils import call_llm
+        content = call_llm(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,  # Slightly higher for better synonym matching
             max_tokens=300,
         )
-
-        content = response.choices[0].message.content.strip()
 
         # Debug output
         if os.getenv("DEBUG_CHATBOT"):
@@ -413,14 +500,13 @@ Examples:
 
 JSON array:"""
 
-        response = client.chat.completions.create(
+        from agent.llm_utils import call_llm
+        content = call_llm(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             max_tokens=200,
         )
-
-        content = response.choices[0].message.content.strip()
 
         # Debug output
         if os.getenv("DEBUG_CHATBOT"):
