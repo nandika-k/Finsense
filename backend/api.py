@@ -3,14 +3,11 @@ FastAPI backend for Finsense web chatbot.
 Provides REST API endpoints for conversation and research.
 """
 
-import asyncio
-import os
-import json
 import uuid
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -21,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.agent import FinsenseCoordinator
+from agent.conversational_agent import ConversationalAgent
 from ui.chatbot import (
     INVESTMENT_GOALS, 
     AVAILABLE_SECTORS, 
@@ -35,6 +33,7 @@ from ui.summary_generator import (
     generate_risk_summary_with_citations,
     generate_stock_picks_summary
 )
+from backend.auth import get_current_user
 
 load_dotenv()
 
@@ -52,6 +51,7 @@ app.add_middleware(
 
 # Session storage (in production, use Redis or database)
 sessions: Dict[str, Dict[str, Any]] = {}
+session_chat_agents: Dict[str, ConversationalAgent] = {}
 
 
 # Request/Response Models
@@ -86,6 +86,7 @@ def create_session() -> str:
     session_id = str(uuid.uuid4())
     sessions[session_id] = {
         "state": "initial",
+        "analysis_mode": "full_research",
         "preferences": {
             "goals": None,
             "sectors": None,
@@ -98,6 +99,15 @@ def create_session() -> str:
     return session_id
 
 
+def get_or_create_conversational_agent(session_id: str) -> ConversationalAgent:
+    """Get or create a session-scoped conversational agent."""
+    agent = session_chat_agents.get(session_id)
+    if agent is None:
+        agent = ConversationalAgent()
+        session_chat_agents[session_id] = agent
+    return agent
+
+
 def get_session(session_id: str) -> Dict[str, Any]:
     """Get session data or create new session"""
     if not session_id or session_id not in sessions:
@@ -106,7 +116,26 @@ def get_session(session_id: str) -> Dict[str, Any]:
     return sessions[session_id]
 
 
-def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> Dict[str, Any]:
+def is_stock_focused_request(user_input: str) -> bool:
+    """Heuristic to detect stock-picks-focused requests."""
+    text = (user_input or "").strip().lower()
+    if not text:
+        return False
+
+    stock_words = ["stock", "stocks", "share", "shares", "picks", "ideas"]
+    report_words = ["report", "full research", "comprehensive", "deep dive", "analysis"]
+
+    has_stock_word = any(word in text for word in stock_words)
+    asks_for_report = any(word in text for word in report_words)
+    return has_stock_word and not asks_for_report
+
+
+async def get_llm_response(
+    user_input: str,
+    context: str,
+    session: Dict[str, Any],
+    session_id: str,
+) -> Dict[str, Any]:
     """
     Process user input based on conversation state.
     Returns dict with: bot_message, new_state, data (parsed values)
@@ -114,6 +143,51 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
     state = session["state"]
     preferences = session["preferences"]
     llm_client = get_llm_client()
+
+    # Conversational-first mode: users can ask direct questions naturally.
+    # Switch to guided report mode only when explicitly requested.
+    message_text = (user_input or "").strip()
+    lowered = message_text.lower()
+    guided_switches = {
+        "/report",
+        "/guided",
+        "guided mode",
+        "research mode",
+        "full report",
+    }
+    chat_switches = {"/chat", "chat mode", "conversational mode"}
+
+    if lowered in chat_switches:
+        session["state"] = "conversational"
+        return {
+            "bot_message": "Switched to conversational mode. Ask for stocks, headlines, market overview, sector risk, or full research anytime.",
+            "state": "conversational",
+            "data": {},
+        }
+
+    if lowered in guided_switches:
+        session["state"] = "collecting_initial"
+        session["analysis_mode"] = "full_research"
+        preferences["goals"] = None
+        preferences["sectors"] = None
+        preferences["risk_tolerance"] = None
+        return {
+            "bot_message": "Switched to guided report mode. " + get_welcome_message(),
+            "state": "collecting_initial",
+            "data": {},
+        }
+
+    if message_text and state in {"initial", "conversational"}:
+        agent = get_or_create_conversational_agent(session_id)
+        bot_message = await agent.process_message(message_text)
+        return {
+            "bot_message": bot_message,
+            "state": "conversational",
+            "data": {},
+        }
+
+    if is_stock_focused_request(user_input):
+        session["analysis_mode"] = "stock_picks"
     
     # Initial state - welcome message
     if state == "initial":
@@ -164,7 +238,9 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
             else:
                 # Have everything, go to confirmation
                 return {
-                    "bot_message": format_confirmation(preferences),
+                    "bot_message": format_confirmation(
+                        preferences, session.get("analysis_mode", "full_research")
+                    ),
                     "state": "confirming",
                     "data": {}
                 }
@@ -172,7 +248,7 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
             # Empty input, start with welcome
             return {
                 "bot_message": get_welcome_message(),
-                "state": "collecting_initial",
+                "state": "conversational",
                 "data": {}
             }
     
@@ -182,19 +258,7 @@ def get_llm_response(user_input: str, context: str, session: Dict[str, Any]) -> 
         user_lower = user_input.strip().lower()
         if any(keyword in user_lower for keyword in ["example", "examples", "sample", "demo"]):
             return {
-                "bot_message": """**Here are some example inputs:**
-
-• "I want growth in technology with medium risk"
-• "ESG investing in healthcare and energy sectors"
-• "Low risk defensive strategy"
-• "Income focused on utilities and consumer staples, low risk"
-• "Technology and financial services with high risk tolerance"
-
-**You can also type:**
-• "ideas" or "help" - see available goal options
-• "what sectors" - see all available sectors
-
-Now, what are you looking for?""",
+                "bot_message": "Tell me what you want to explore, and I’ll guide you from there.",
                 "state": "collecting_initial",
                 "data": {}
             }
@@ -278,7 +342,9 @@ Now, what are you looking for?""",
             }
         else:
             return {
-                "bot_message": format_confirmation(preferences),
+                "bot_message": format_confirmation(
+                    preferences, session.get("analysis_mode", "full_research")
+                ),
                 "state": "confirming",
                 "data": {}
             }
@@ -369,7 +435,9 @@ Now, what are you looking for?""",
             }
         else:
             return {
-                "bot_message": format_confirmation(preferences),
+                "bot_message": format_confirmation(
+                    preferences, session.get("analysis_mode", "full_research")
+                ),
                 "state": "confirming",
                 "data": {}
             }
@@ -488,7 +556,7 @@ Now, what are you looking for?""",
             acknowledgment = ""
         
         if not risk_value or risk_value not in ["low", "medium", "high"]:
-            print(f"[DEBUG] Risk tolerance is missing or invalid, asking for it")
+            print("[DEBUG] Risk tolerance is missing or invalid, asking for it")
             return {
                 "bot_message": acknowledgment + format_risk_question(),
                 "state": "collecting_risk",
@@ -497,7 +565,9 @@ Now, what are you looking for?""",
         else:
             print(f"[DEBUG] Risk tolerance exists: {risk_value}, going to confirmation")
             return {
-                "bot_message": format_confirmation(preferences),
+                "bot_message": format_confirmation(
+                    preferences, session.get("analysis_mode", "full_research")
+                ),
                 "state": "confirming",
                 "data": {}
             }
@@ -552,7 +622,10 @@ Now, what are you looking for?""",
         
         # Move to confirmation
         return {
-            "bot_message": acknowledgment + format_confirmation(preferences),
+            "bot_message": acknowledgment
+            + format_confirmation(
+                preferences, session.get("analysis_mode", "full_research")
+            ),
             "state": "confirming",
             "data": {}
         }
@@ -561,13 +634,20 @@ Now, what are you looking for?""",
     elif state == "confirming":
         response_lower = user_input.strip().lower()
         if response_lower in ["yes", "y"]:
+            mode = session.get("analysis_mode", "full_research")
+            start_message = (
+                "Great! Starting stock-focused analysis..."
+                if mode == "stock_picks"
+                else "Great! Starting research analysis..."
+            )
             return {
-                "bot_message": "Great! Starting research analysis...",
+                "bot_message": start_message,
                 "state": "ready_to_research",
                 "data": {}
             }
         elif response_lower in ["no", "n"]:
             # Restart
+            session["analysis_mode"] = "full_research"
             preferences["goals"] = None
             preferences["sectors"] = None
             preferences["risk_tolerance"] = None
@@ -593,18 +673,18 @@ Now, what are you looking for?""",
 
 def get_welcome_message() -> str:
     """Get initial welcome message"""
-    return """Welcome! I'll help you identify sectors and stocks worth researching based on your investment goals and risk tolerance.
-
-What are you looking for?"""
+    return """Welcome! You can ask for stock ideas, market overview, sector risks, news headlines, or full research."""
 
 
 def format_goals_question(parsed: Dict = None) -> str:
-    """Format the goals collection question"""
-    goals_list = "\n".join([
-        f"{idx}. **{info['name']}**: {info['description']}"
-        for idx, (key, info) in enumerate(INVESTMENT_GOALS.items(), 1)
-    ])
-    
+    """Format the goals collection question."""
+    goals_list = "\n".join(
+        [
+            f"{idx}. **{info['name']}**: {info['description']}"
+            for idx, (key, info) in enumerate(INVESTMENT_GOALS.items(), 1)
+        ]
+    )
+
     return f"""**What are your primary investment objectives?**
 
 {goals_list}
@@ -644,7 +724,7 @@ def format_risk_question() -> str:
 Enter 1-3 or describe your risk comfort level."""
 
 
-def format_confirmation(preferences: Dict) -> str:
+def format_confirmation(preferences: Dict, analysis_mode: str = "full_research") -> str:
     """Format confirmation message"""
     goals = preferences.get("goals", [])
     sectors = preferences.get("sectors", [])
@@ -659,7 +739,9 @@ def format_confirmation(preferences: Dict) -> str:
         msg += "**Investment Goals:** Exploratory (no specific goals)\n"
     
     msg += f"**Sectors to Analyze:** {', '.join(sectors)} ({len(sectors)} total)\n"
-    msg += f"**Risk Tolerance:** {risk.upper()}\n\n"
+    msg += f"**Risk Tolerance:** {risk.upper()}\n"
+    mode_label = "Stock Picks" if analysis_mode == "stock_picks" else "Full Research Report"
+    msg += f"**Analysis Mode:** {mode_label}\n\n"
     msg += "**Proceed with this analysis?** (yes/no)"
     
     return msg
@@ -831,6 +913,53 @@ def format_research_results(research_data: Dict, preferences: Dict) -> str:
     return html
 
 
+def format_stock_focused_results(research_data: Dict, preferences: Dict) -> str:
+    """Format a stock-picks-first result view."""
+    html = "<div class='research-results'>"
+    html += "<div class='result-section'><h3>📈 Stock Picks</h3>"
+
+    stock_recs = research_data.get("stock_recommendations", {})
+    if stock_recs and "error" not in stock_recs:
+        for goal, goal_data in stock_recs.items():
+            if isinstance(goal_data, dict) and "stocks" in goal_data:
+                stocks = goal_data.get("stocks", [])
+                goal_display = goal.upper()
+                html += f"<h4>{goal_display} Goal - {goal_data.get('summary', '')}</h4>"
+
+                if stocks:
+                    html += "<div class='stock-recommendations'>"
+                    for stock in stocks:
+                        html += f"""
+                        <div class='stock-card'>
+                            <div class='stock-header'>
+                                <span class='stock-ticker'>{stock['ticker']}</span>
+                                <span class='stock-price'>${stock['price']}</span>
+                            </div>
+                            <h5>{stock['name']}</h5>
+                            <div class='stock-metrics'>
+                                <div class='metric'><strong>1M Performance:</strong> {stock['performance_1m']}</div>
+                                <div class='metric'><strong>Volatility:</strong> {stock['volatility']}</div>
+                                {f"<div class='metric'><strong>Dividend Yield:</strong> {stock['dividend_yield']}</div>" if stock.get('dividend_yield') != 'N/A' else ''}
+                                {f"<div class='metric'><strong>ESG Score:</strong> {stock['esg_score']}</div>" if stock.get('esg_score') != 'N/A' else ''}
+                            </div>
+                            <div class='stock-score'>Score: {stock['score']}</div>
+                            {f"<p class='stock-reasons'><strong>Why:</strong> {', '.join(stock['reasons'][:2])}</p>" if stock.get('reasons') else ''}
+                        </div>
+                        """
+                    html += "</div>"
+    else:
+        html += "<p>No stock recommendations available for the selected preferences yet.</p>"
+
+    html += "</div>"
+
+    stock_summary = generate_stock_picks_summary(research_data)
+    if stock_summary:
+        html += f"<div class='result-section'><h3>🤖 Stock Picks Explained</h3><p>{stock_summary}</p></div>"
+
+    html += "</div>"
+    return html
+
+
 # API Endpoints
 @app.get("/")
 async def root():
@@ -839,7 +968,7 @@ async def root():
 
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat(request: ChatMessage):
+async def chat(request: ChatMessage, user: Dict[str, Any] = Depends(get_current_user)):
     """
     Handle chat messages and guide conversation.
     """
@@ -855,7 +984,7 @@ async def chat(request: ChatMessage):
     })
     
     # Process message based on state
-    response_data = get_llm_response(request.message, "", session)
+    response_data = await get_llm_response(request.message, "", session, session_id)
     
     # DEBUG: Log the response before returning
     print(f"[DEBUG ENDPOINT] Response data: state={response_data.get('state')}, bot_message length={len(response_data.get('bot_message', ''))}")
@@ -883,7 +1012,7 @@ async def chat(request: ChatMessage):
 
 
 @app.post("/api/research", response_model=ResearchResponse)
-async def research(request: ResearchRequest):
+async def research(request: ResearchRequest, user: Dict[str, Any] = Depends(get_current_user)):
     """
     Trigger research analysis for a session.
     """
@@ -892,6 +1021,7 @@ async def research(request: ResearchRequest):
     
     session = sessions[request.session_id]
     preferences = session["preferences"]
+    analysis_mode = session.get("analysis_mode", "full_research")
     
     # Validate preferences
     if not preferences.get("sectors") or not preferences.get("risk_tolerance"):
@@ -920,7 +1050,10 @@ async def research(request: ResearchRequest):
         await coordinator.cleanup()
         
         # Format results as HTML
-        results_html = format_research_results(research_data, preferences)
+        if analysis_mode == "stock_picks":
+            results_html = format_stock_focused_results(research_data, preferences)
+        else:
+            results_html = format_research_results(research_data, preferences)
         
         return ResearchResponse(
             session_id=request.session_id,
@@ -937,7 +1070,7 @@ async def research(request: ResearchRequest):
 
 
 @app.get("/api/status/{session_id}")
-async def get_status(session_id: str):
+async def get_status(session_id: str, user: Dict[str, Any] = Depends(get_current_user)):
     """Get session status"""
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found")

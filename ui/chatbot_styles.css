@@ -51,12 +51,47 @@ body {
     color: var(--white);
     padding: 24px 0;
     border-bottom: 3px solid var(--medium-green);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .header .logo {
     max-width: 1200px;
     margin: 0 auto;
     padding: 0 32px;
+}
+
+.auth-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 32px;
+}
+
+.auth-status {
+    font-size: 13px;
+    opacity: 0.95;
+}
+
+.auth-button {
+    border: 1px solid var(--light-green);
+    background: transparent;
+    color: var(--white);
+    padding: 6px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.auth-button:hover {
+    background: var(--medium-green);
+}
+
+.auth-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 .logo h1 {

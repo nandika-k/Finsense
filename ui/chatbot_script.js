@@ -5,24 +5,147 @@ const API_BASE_URL = window.location.hostname === 'localhost' || window.location
     ? 'http://localhost:8000' 
     : 'https://finsense-ktp7.onrender.com'; 
 
+const AUTH0_CONFIG = window.FINSENSE_AUTH0 || {
+    domain: '',
+    clientId: '',
+    audience: ''
+};
+
+function hasAuthConfig() {
+    return Boolean(AUTH0_CONFIG.domain && AUTH0_CONFIG.clientId && AUTH0_CONFIG.audience);
+}
+
+function buildAuthHeaders(accessToken) {
+    const headers = {
+        'Content-Type': 'application/json',
+    };
+
+    if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`;
+    }
+
+    return headers;
+}
+
 class ChatbotUI {
     constructor() {
         this.messagesArea = document.getElementById('messagesArea');
         this.userInput = document.getElementById('userInput');
         this.sendButton = document.getElementById('sendButton');
+        this.loginButton = document.getElementById('loginButton');
+        this.logoutButton = document.getElementById('logoutButton');
+        this.authStatus = document.getElementById('authStatus');
         this.sessionId = null;
         this.currentState = 'initial';
         this.progressMessageId = null;
+        this.auth0Client = null;
+        this.accessToken = null;
+        this.isAuthenticated = false;
+        this.authEnabled = hasAuthConfig();
         
         this.initializeEventListeners();
         this.adjustTextareaHeight();
-        
-        // Load welcome message (async but fire-and-forget with error handling)
-        this.loadWelcomeMessage().catch(error => {
+
+        this.setInputEnabled(false);
+
+        this.initialize().catch(error => {
             console.error('Error loading welcome message:', error);
-            // Ensure fallback message shows even if promise rejection isn't caught
             this.addBotMessage('Welcome! Unable to connect to server. Please check your connection and try again.');
         });
+    }
+
+    async initialize() {
+        await this.initializeAuth();
+
+        if (!this.authEnabled || this.isAuthenticated) {
+            await this.loadWelcomeMessage();
+            return;
+        }
+
+        this.addBotMessage('Please log in to start using Finsense.');
+    }
+
+    async initializeAuth() {
+        if (!this.authEnabled) {
+            this.authStatus.textContent = 'Auth disabled (dev mode)';
+            this.loginButton.style.display = 'none';
+            this.logoutButton.style.display = 'none';
+            this.setInputEnabled(true);
+            return;
+        }
+
+        if (typeof window.createAuth0Client !== 'function') {
+            this.authStatus.textContent = 'Auth unavailable';
+            throw new Error('Auth0 SDK failed to load');
+        }
+
+        this.auth0Client = await window.createAuth0Client({
+            domain: AUTH0_CONFIG.domain,
+            clientId: AUTH0_CONFIG.clientId,
+            authorizationParams: {
+                audience: AUTH0_CONFIG.audience,
+                redirect_uri: `${window.location.origin}${window.location.pathname}`,
+            },
+            cacheLocation: 'localstorage',
+            useRefreshTokens: true,
+        });
+
+        const query = window.location.search;
+        if (query.includes('code=') && query.includes('state=')) {
+            await this.auth0Client.handleRedirectCallback();
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+
+        this.isAuthenticated = await this.auth0Client.isAuthenticated();
+        if (this.isAuthenticated) {
+            this.accessToken = await this.auth0Client.getTokenSilently();
+        }
+
+        this.updateAuthUI();
+    }
+
+    updateAuthUI() {
+        if (!this.authEnabled) {
+            return;
+        }
+
+        this.loginButton.style.display = this.isAuthenticated ? 'none' : 'inline-block';
+        this.logoutButton.style.display = this.isAuthenticated ? 'inline-block' : 'none';
+        this.authStatus.textContent = this.isAuthenticated ? 'Signed in' : 'Signed out';
+        this.setInputEnabled(this.isAuthenticated);
+    }
+
+    async login() {
+        if (!this.auth0Client) {
+            return;
+        }
+
+        await this.auth0Client.loginWithRedirect({
+            authorizationParams: {
+                audience: AUTH0_CONFIG.audience,
+                redirect_uri: `${window.location.origin}${window.location.pathname}`,
+            },
+        });
+    }
+
+    async logout() {
+        if (!this.auth0Client) {
+            return;
+        }
+
+        this.auth0Client.logout({
+            logoutParams: {
+                returnTo: `${window.location.origin}${window.location.pathname}`,
+            },
+        });
+    }
+
+    getHeaders() {
+        if (this.authEnabled && !this.accessToken) {
+            throw new Error('Please log in first.');
+        }
+
+        return buildAuthHeaders(this.accessToken);
     }
     
     async loadWelcomeMessage() {
@@ -33,9 +156,7 @@ class ChatbotUI {
             
             const response = await fetch(`${API_BASE_URL}/api/chat`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: this.getHeaders(),
                 body: JSON.stringify({
                     session_id: this.sessionId,
                     message: ''
@@ -66,6 +187,9 @@ class ChatbotUI {
     }
 
     initializeEventListeners() {
+        this.loginButton.addEventListener('click', () => this.login());
+        this.logoutButton.addEventListener('click', () => this.logout());
+
         // Send button click
         this.sendButton.addEventListener('click', () => this.handleSendMessage());
 
@@ -134,9 +258,7 @@ class ChatbotUI {
     async sendChatMessage(message) {
         const response = await fetch(`${API_BASE_URL}/api/chat`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: this.getHeaders(),
             body: JSON.stringify({
                 session_id: this.sessionId,
                 message: message
@@ -166,9 +288,7 @@ class ChatbotUI {
             // Trigger research
             const response = await fetch(`${API_BASE_URL}/api/research`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: this.getHeaders(),
                 body: JSON.stringify({
                     session_id: this.sessionId
                 })
