@@ -31,7 +31,9 @@ class PreferenceParseResult:
 class PreferenceCollector:
     """Dynamically collects missing user preferences over multiple turns."""
 
-    def __init__(self, llm_provider: str = "groq", model: str = "llama-3.3-70b-versatile"):
+    def __init__(
+        self, llm_provider: str = "groq", model: str = "llama-3.3-70b-versatile"
+    ):
         self.llm_provider = llm_provider
         self.model = model
         self._groq_client = None
@@ -84,7 +86,9 @@ class PreferenceCollector:
             return "Thanks — I have everything I need."
 
         primary = missing_fields[0]
-        return self._question_map.get(primary, "Could you share a bit more about your investment preferences?")
+        return self._question_map.get(
+            primary, "Could you share a bit more about your investment preferences?"
+        )
 
     def parse_preference_response(self, user_input: str) -> PreferenceParseResult:
         """
@@ -133,7 +137,11 @@ class PreferenceCollector:
             "missing_fields": missing_fields,
             "validation_errors": validation_errors,
             "is_complete": is_complete,
-            "next_question": None if is_complete else self.generate_preference_question(missing_fields),
+            "next_question": (
+                None
+                if is_complete
+                else self.generate_preference_question(missing_fields)
+            ),
         }
 
     def update_preferences(
@@ -146,7 +154,9 @@ class PreferenceCollector:
         sectors = list(dict.fromkeys(current.sectors + parsed.sectors))
         risk_tolerance = parsed.risk_tolerance or current.risk_tolerance
 
-        return UserPreferences(goals=goals, sectors=sectors, risk_tolerance=risk_tolerance)
+        return UserPreferences(
+            goals=goals, sectors=sectors, risk_tolerance=risk_tolerance
+        )
 
     def _parse_with_llm(self, user_input: str) -> Optional[PreferenceParseResult]:
         """LLM parser compatible with existing chatbot parsing behavior."""
@@ -256,7 +266,9 @@ Return ONLY JSON:
             risk_tolerance = "high"
 
         confidence = "low"
-        signal_count = int(bool(goals)) + int(bool(sectors)) + int(risk_tolerance is not None)
+        signal_count = (
+            int(bool(goals)) + int(bool(sectors)) + int(risk_tolerance is not None)
+        )
         if signal_count >= 2:
             confidence = "high"
         elif signal_count == 1:

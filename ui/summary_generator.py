@@ -1,19 +1,20 @@
 """
 LLM-based summary generator for research findings.
 
-Uses Groq LLM with low temperature to generate summaries based strictly on 
+Uses Groq LLM with low temperature to generate summaries based strictly on
 MCP server outputs without hallucination.
 """
 
 import os
 import json
-from typing import Dict, List, Any
+from typing import Dict, Any
 from dotenv import load_dotenv
 
 load_dotenv()
 
 try:
     from groq import Groq
+
     HAS_GROQ = True
 except ImportError:
     HAS_GROQ = False
@@ -24,15 +25,17 @@ def get_groq_client():
     """Get Groq client if API key is available"""
     if not HAS_GROQ:
         return None
-    
+
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         return None
-    
+
     return Groq(api_key=api_key)
 
 
-def generate_sector_goal_summary(research_data: Dict[str, Any], preferences: Dict[str, Any]) -> str:
+def generate_sector_goal_summary(
+    research_data: Dict[str, Any], preferences: Dict[str, Any]
+) -> str:
     """
     Generate a brief summary about sectors and their correlation to investment goals.
     Uses actual research data - no hallucination.
@@ -40,25 +43,25 @@ def generate_sector_goal_summary(research_data: Dict[str, Any], preferences: Dic
     client = get_groq_client()
     if not client:
         return "[LLM summary unavailable - set GROQ_API_KEY to enable]"
-    
+
     # Extract relevant data from research
     sectors = list(research_data.get("sector_deep_dives", {}).keys())
     goals = preferences.get("goals", [])
     goal_recs = research_data.get("goal_based_recommendations", {})
-    
+
     # Build data context for LLM
     sector_data_summary = {}
     for sector, data in research_data.get("sector_deep_dives", {}).items():
         perf = data.get("market_performance", {})
         risk = data.get("risk_profile", {})
-        
+
         sector_data_summary[sector] = {
             "performance_1m": perf.get("performance_1m", "N/A"),
             "performance_3m": perf.get("performance_3m", "N/A"),
             "volatility": risk.get("annualized_volatility", "N/A"),
-            "risk_level": risk.get("percentile", "N/A")
+            "risk_level": risk.get("percentile", "N/A"),
         }
-    
+
     # Goal names mapping
     goal_names_map = {
         "growth": "Growth (capital appreciation)",
@@ -66,11 +69,11 @@ def generate_sector_goal_summary(research_data: Dict[str, Any], preferences: Dic
         "esg": "ESG (environmental/social responsibility)",
         "value": "Value (undervalued opportunities)",
         "defensive": "Defensive (downside protection)",
-        "diversified": "Diversified (risk spreading)"
+        "diversified": "Diversified (risk spreading)",
     }
-    
+
     goal_names = [goal_names_map.get(g, g) for g in goals]
-    
+
     prompt = f"""Based ONLY on the following factual data from market research, write a brief 2-3 sentence summary about how the analyzed sectors align with the investor's goals.
 
 INVESTOR GOALS: {', '.join(goal_names) if goal_names else 'Exploratory (no specific goals)'}
@@ -95,11 +98,11 @@ Instructions:
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,  # Very low temperature to minimize hallucination
-            max_tokens=200
+            max_tokens=200,
         )
-        
+
         return response.choices[0].message.content.strip()
-    
+
     except Exception as e:
         return f"[Error generating summary: {e}]"
 
@@ -112,11 +115,11 @@ def generate_risk_summary_with_citations(research_data: Dict[str, Any]) -> str:
     client = get_groq_client()
     if not client:
         return "[LLM risk summary unavailable - set GROQ_API_KEY to enable]"
-    
+
     # Extract risk themes from all sectors
     risk_themes = {}
     article_citations = {}
-    
+
     for sector, data in research_data.get("sector_deep_dives", {}).items():
         news = data.get("news_analysis", {})
         if "error" not in news and news:
@@ -127,33 +130,41 @@ def generate_risk_summary_with_citations(research_data: Dict[str, Any]) -> str:
                     risk_text = risk_item.get("risk", "N/A")
                     category = risk_item.get("category", "N/A")
                     article_count = risk_item.get("article_count", 0)
-                    articles = risk_item.get("articles", [])  # Changed from "sources" to "articles"
-                    
-                    risk_themes[sector].append({
-                        "risk": risk_text,
-                        "category": category,
-                        "article_count": article_count
-                    })
-                    
+                    articles = risk_item.get(
+                        "articles", []
+                    )  # Changed from "sources" to "articles"
+
+                    risk_themes[sector].append(
+                        {
+                            "risk": risk_text,
+                            "category": category,
+                            "article_count": article_count,
+                        }
+                    )
+
                     # Collect article citations (top 2 articles per risk)
                     for article in articles[:2]:
                         title = article.get("title", "")
                         date = article.get("date", "")
                         source = article.get("source", "")
-                        
+
                         if title:  # Only add if we have a title
                             if sector not in article_citations:
                                 article_citations[sector] = []
-                            article_citations[sector].append({
-                                "title": title[:120],  # Truncate long titles
-                                "date": date,
-                                "source": source,
-                                "related_risk": risk_text[:80]  # Show which risk this article relates to
-                            })
-    
+                            article_citations[sector].append(
+                                {
+                                    "title": title[:120],  # Truncate long titles
+                                    "date": date,
+                                    "source": source,
+                                    "related_risk": risk_text[
+                                        :80
+                                    ],  # Show which risk this article relates to
+                                }
+                            )
+
     if not risk_themes:
         return "No significant risks identified in recent news analysis."
-    
+
     prompt = f"""Based ONLY on the following risk data extracted from real news articles, write a brief summary (3-4 sentences) highlighting the most significant risks across sectors.
 
 IDENTIFIED RISKS BY SECTOR:
@@ -174,40 +185,46 @@ Instructions:
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
-            max_tokens=250
+            max_tokens=250,
         )
-        
+
         summary = response.choices[0].message.content.strip()
-        
+
         # Add article citations at the end with better formatting
         if article_citations:
             summary += "<br><br><strong>📰 Related News Articles:</strong><br>"
             article_count = 0
-            for sector, articles in list(article_citations.items())[:3]:  # Max 3 sectors
+            for sector, articles in list(article_citations.items())[
+                :3
+            ]:  # Max 3 sectors
                 for article in articles[:3]:  # Max 3 articles per sector
                     if article_count >= 8:  # Limit total articles to 8
                         break
-                    summary += f"<div style='margin: 8px 0; padding-left: 12px;'>"
-                    summary += f"<strong>[{sector.upper()}]</strong> {article['title']}<br>"
-                    
-                    if article.get('related_risk'):
+                    summary += "<div style='margin: 8px 0; padding-left: 12px;'>"
+                    summary += (
+                        f"<strong>[{sector.upper()}]</strong> {article['title']}<br>"
+                    )
+
+                    if article.get("related_risk"):
                         summary += f"<em>Risk: {article['related_risk']}</em><br>"
-                    
+
                     # Make source a clickable link with confirmation popup
-                    if article.get('source'):
-                        source = article['source']
-                        if source.startswith('http://') or source.startswith('https://'):
+                    if article.get("source"):
+                        source = article["source"]
+                        if source.startswith("http://") or source.startswith(
+                            "https://"
+                        ):
                             summary += f"<small>Source: <a href='{source}' target='_blank' onclick='return confirm(\"You are about to visit an external website. Continue?\");'>{source}</a></small>"
                         else:
                             summary += f"<small>Source: {source}</small>"
-                    
+
                     summary += "</div>"
                     article_count += 1
                 if article_count >= 8:
                     break
-        
+
         return summary
-    
+
     except Exception as e:
         return f"[Error generating risk summary: {e}]"
 
@@ -220,13 +237,13 @@ def generate_stock_picks_summary(research_data: Dict[str, Any]) -> str:
     client = get_groq_client()
     if not client:
         return "[LLM stock summary unavailable - set GROQ_API_KEY to enable]"
-    
+
     # Extract stock recommendations
     stock_recs = research_data.get("stock_recommendations", {})
-    
+
     if not stock_recs or "error" in stock_recs:
         return ""
-    
+
     # Build context for LLM
     stock_summary = {}
     for goal, data in stock_recs.items():
@@ -235,20 +252,22 @@ def generate_stock_picks_summary(research_data: Dict[str, Any]) -> str:
             if stocks:
                 stock_summary[goal] = []
                 for stock in stocks[:3]:  # Top 3 per goal
-                    stock_summary[goal].append({
-                        "ticker": stock.get("ticker"),
-                        "name": stock.get("name"),
-                        "price": stock.get("price"),
-                        "performance_1m": stock.get("performance_1m"),
-                        "volatility": stock.get("volatility"),
-                        "dividend_yield": stock.get("dividend_yield"),
-                        "esg_score": stock.get("esg_score"),
-                        "reasons": stock.get("reasons", [])
-                    })
-    
+                    stock_summary[goal].append(
+                        {
+                            "ticker": stock.get("ticker"),
+                            "name": stock.get("name"),
+                            "price": stock.get("price"),
+                            "performance_1m": stock.get("performance_1m"),
+                            "volatility": stock.get("volatility"),
+                            "dividend_yield": stock.get("dividend_yield"),
+                            "esg_score": stock.get("esg_score"),
+                            "reasons": stock.get("reasons", []),
+                        }
+                    )
+
     if not stock_summary:
         return ""
-    
+
     prompt = f"""Based ONLY on the following stock recommendations data, write a brief 2-3 sentence summary explaining why these stocks were recommended for the specified investment goals.
 
 STOCK RECOMMENDATIONS BY GOAL:
@@ -265,11 +284,10 @@ Instructions:
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
-            max_tokens=200
+            max_tokens=200,
         )
-        
+
         return response.choices[0].message.content.strip()
-    
+
     except Exception as e:
         return f"[Error generating stock summary: {e}]"
-

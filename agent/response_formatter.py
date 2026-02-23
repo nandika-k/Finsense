@@ -14,7 +14,9 @@ from typing import Any, Dict, List, Optional
 class ResponseFormatter:
     """Formats tool results into user-facing conversational responses."""
 
-    def __init__(self, llm_provider: str = "groq", model: str = "llama-3.3-70b-versatile"):
+    def __init__(
+        self, llm_provider: str = "groq", model: str = "llama-3.3-70b-versatile"
+    ):
         self.llm_provider = llm_provider
         self.model = model
         self._groq_client = None
@@ -70,13 +72,19 @@ class ResponseFormatter:
 
         top_performers = sector_summary.get("top_performers", [])
         if isinstance(top_performers, list) and top_performers:
-            tickers = [item.get("ticker") for item in top_performers if isinstance(item, dict) and item.get("ticker")]
+            tickers = [
+                item.get("ticker")
+                for item in top_performers
+                if isinstance(item, dict) and item.get("ticker")
+            ]
             if tickers:
                 lines.append(f"- Notable names: {', '.join(tickers[:5])}")
 
         if volatility_data:
             if volatility_data.get("error"):
-                lines.append(f"- Volatility: unavailable ({volatility_data.get('error')})")
+                lines.append(
+                    f"- Volatility: unavailable ({volatility_data.get('error')})"
+                )
             else:
                 annualized = volatility_data.get("annualized_volatility", "N/A")
                 drawdown = volatility_data.get("max_drawdown", "N/A")
@@ -100,7 +108,9 @@ class ResponseFormatter:
         stocks = recommendations_data.get("stocks", [])
 
         if not stocks:
-            return f"I don’t have stock recommendations for {sector} ({goal}) right now."
+            return (
+                f"I don’t have stock recommendations for {sector} ({goal}) right now."
+            )
 
         lines = [f"Top stock ideas for {goal} in {sector}:"]
         for idx, stock in enumerate(stocks[:5], start=1):
@@ -108,7 +118,9 @@ class ResponseFormatter:
             name = stock.get("name", "")
             perf = stock.get("performance_1m", "N/A")
             volatility = stock.get("volatility", "N/A")
-            lines.append(f"{idx}. {ticker} ({name}) — 1M: {perf}, Volatility: {volatility}")
+            lines.append(
+                f"{idx}. {ticker} ({name}) — 1M: {perf}, Volatility: {volatility}"
+            )
 
         return "\n".join(lines)
 
@@ -125,7 +137,9 @@ class ResponseFormatter:
 
         if volatility_data:
             if volatility_data.get("error"):
-                lines.append(f"- Volatility metrics unavailable: {volatility_data.get('error')}")
+                lines.append(
+                    f"- Volatility metrics unavailable: {volatility_data.get('error')}"
+                )
             else:
                 sector = volatility_data.get("sector", "sector")
                 annualized = volatility_data.get("annualized_volatility", "N/A")
@@ -137,12 +151,20 @@ class ResponseFormatter:
 
         if structural_risks_data:
             if structural_risks_data.get("error"):
-                lines.append(f"- Structural risk view unavailable: {structural_risks_data.get('error')}")
+                lines.append(
+                    f"- Structural risk view unavailable: {structural_risks_data.get('error')}"
+                )
             else:
                 categories = structural_risks_data.get("risk_categories", [])
                 if isinstance(categories, list) and categories:
-                    category_names = [c.get("category", "Unknown") for c in categories[:4] if isinstance(c, dict)]
-                    lines.append(f"- Structural risk categories: {', '.join(category_names)}")
+                    category_names = [
+                        c.get("category", "Unknown")
+                        for c in categories[:4]
+                        if isinstance(c, dict)
+                    ]
+                    lines.append(
+                        f"- Structural risk categories: {', '.join(category_names)}"
+                    )
                 summary = structural_risks_data.get("summary")
                 if summary:
                     lines.append(f"- {summary}")
@@ -168,7 +190,9 @@ class ResponseFormatter:
                 sector = headlines_data.get("sector", "sector")
                 timeframe = headlines_data.get("timeframe", "recent period")
                 count = headlines_data.get("headline_count", 0)
-                lines.append(f"Recent news for {sector} ({timeframe}): {count} headlines analyzed.")
+                lines.append(
+                    f"Recent news for {sector} ({timeframe}): {count} headlines analyzed."
+                )
 
                 headlines = headlines_data.get("headlines", [])
                 for item in headlines[:3]:
@@ -193,7 +217,9 @@ class ResponseFormatter:
                     risk_name = risk.get("risk", "Unspecified risk")
                     category = risk.get("category", "Uncategorized")
                     article_count = risk.get("article_count", 0)
-                    lines.append(f"- {risk_name} ({category}) — referenced in {article_count} article(s)")
+                    lines.append(
+                        f"- {risk_name} ({category}) — referenced in {article_count} article(s)"
+                    )
 
                 if include_citations:
                     citation_block = self._format_news_citations(risk_themes_data)
@@ -266,7 +292,9 @@ class ResponseFormatter:
                 if not isinstance(article, dict):
                     continue
                 title = article.get("title", "Untitled")
-                source = article.get("source") or article.get("url") or "Source unavailable"
+                source = (
+                    article.get("source") or article.get("url") or "Source unavailable"
+                )
                 citations.append(f"- {risk_name}: {title} ({source})")
 
         if not citations:

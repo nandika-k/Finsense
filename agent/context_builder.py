@@ -13,15 +13,45 @@ import os
 import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from agent.conversation_manager import Message
 
-
 STOPWORDS = {
-    "a", "an", "the", "is", "are", "was", "were", "to", "of", "for", "and", "or",
-    "in", "on", "at", "by", "with", "this", "that", "it", "i", "me", "you", "my",
-    "your", "about", "tell", "show", "what", "how", "can", "could", "please", "today",
+    "a",
+    "an",
+    "the",
+    "is",
+    "are",
+    "was",
+    "were",
+    "to",
+    "of",
+    "for",
+    "and",
+    "or",
+    "in",
+    "on",
+    "at",
+    "by",
+    "with",
+    "this",
+    "that",
+    "it",
+    "i",
+    "me",
+    "you",
+    "my",
+    "your",
+    "about",
+    "tell",
+    "show",
+    "what",
+    "how",
+    "can",
+    "could",
+    "please",
+    "today",
 }
 
 
@@ -37,7 +67,9 @@ class ReferenceMatch:
 class ContextBuilder:
     """Builds context-aware responses from conversation history."""
 
-    def __init__(self, llm_provider: str = "groq", model: str = "llama-3.3-70b-versatile"):
+    def __init__(
+        self, llm_provider: str = "groq", model: str = "llama-3.3-70b-versatile"
+    ):
         self.llm_provider = llm_provider
         self.model = model
         self._groq_client = None
@@ -103,7 +135,8 @@ class ContextBuilder:
             return []
 
         relevant_users = [
-            m for m in self.get_relevant_history(user_query, history, top_k=top_k * 2)
+            m
+            for m in self.get_relevant_history(user_query, history, top_k=top_k * 2)
             if m.role == "user"
         ]
 
@@ -139,13 +172,17 @@ class ContextBuilder:
         suggestions: List[str] = []
 
         if any(k in combined for k in ["market", "indices", "spx", "dji"]):
-            suggestions.append("Would you like a sector breakdown behind those market moves?")
+            suggestions.append(
+                "Would you like a sector breakdown behind those market moves?"
+            )
         if any(k in combined for k in ["sector", "technology", "healthcare", "energy"]):
             suggestions.append("Do you want a deeper risk profile for this sector?")
         if any(k in combined for k in ["risk", "volatility", "drawdown", "var"]):
             suggestions.append("Should I pull recent news themes driving that risk?")
         if any(k in combined for k in ["stock", "ticker", "recommendation"]):
-            suggestions.append("Would you like me to compare these with another sector or goal?")
+            suggestions.append(
+                "Would you like me to compare these with another sector or goal?"
+            )
 
         if not suggestions:
             suggestions = [
@@ -273,7 +310,7 @@ Constraints:
         except ValueError:
             return None
 
-        for message in history[idx + 1:]:
+        for message in history[idx + 1 :]:
             if message.role == "assistant":
                 return message
         return None

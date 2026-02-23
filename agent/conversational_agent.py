@@ -85,7 +85,9 @@ class ConversationalAgent:
                 user_message,
                 conversation_context=context_window,
             )
-            self.analytics.record_intent(self._active_query_index, classification.intent_type.value)
+            self.analytics.record_intent(
+                self._active_query_index, classification.intent_type.value
+            )
 
             response = await self._handle_classified_message(classification)
 
@@ -115,17 +117,24 @@ class ConversationalAgent:
             elapsed_ms = (time.perf_counter() - start) * 1000.0
             self.analytics.record_response_time(self._active_query_index, elapsed_ms)
             user_turns = sum(
-                1 for message in self.conversation_manager.get_full_history() if message.role == "user"
+                1
+                for message in self.conversation_manager.get_full_history()
+                if message.role == "user"
             )
             self.analytics.record_conversation_length(user_turns)
             self._active_query_index = None
 
-    async def _handle_classified_message(self, classification: IntentClassification) -> str:
+    async def _handle_classified_message(
+        self, classification: IntentClassification
+    ) -> str:
         """Handle intent-specific paths before/after tool execution."""
         intent = classification.intent_type
 
         if classification.clarification_needed:
-            prompt = classification.clarification_message or "Could you provide a bit more detail?"
+            prompt = (
+                classification.clarification_message
+                or "Could you provide a bit more detail?"
+            )
             return self.response_formatter.format_clarification_prompt(prompt)
 
         if intent == IntentType.GREETING:
@@ -138,7 +147,9 @@ class ConversationalAgent:
             )
 
         if intent == IntentType.VIEW_PREFERENCES:
-            return self._format_preferences_view(self.conversation_manager.get_preferences())
+            return self._format_preferences_view(
+                self.conversation_manager.get_preferences()
+            )
 
         if intent == IntentType.CLEAR_PREFERENCES:
             self.conversation_manager.clear_preferences()
@@ -149,11 +160,19 @@ class ConversationalAgent:
 
         current_preferences = self.conversation_manager.get_preferences()
         if classification.requires_preferences:
-            self.analytics.record_preference_collection(self._active_query_index, required=True, success=None)
-            missing = self.preference_collector.check_required_preferences(current_preferences)
+            self.analytics.record_preference_collection(
+                self._active_query_index, required=True, success=None
+            )
+            missing = self.preference_collector.check_required_preferences(
+                current_preferences
+            )
             if missing:
-                self.analytics.record_preference_collection(self._active_query_index, required=True, success=False)
-                question = self.preference_collector.generate_preference_question(missing)
+                self.analytics.record_preference_collection(
+                    self._active_query_index, required=True, success=False
+                )
+                question = self.preference_collector.generate_preference_question(
+                    missing
+                )
                 return self.response_formatter.format_clarification_prompt(question)
 
         tool_calls = self.tool_router.route_intent_to_tools(
@@ -171,7 +190,9 @@ class ConversationalAgent:
     def _handle_set_preferences(self, user_message: str) -> str:
         """Collect/update preferences from a user message."""
         current = self.conversation_manager.get_preferences()
-        outcome = self.preference_collector.collect_preferences_turn(current, user_message)
+        outcome = self.preference_collector.collect_preferences_turn(
+            current, user_message
+        )
         updated: UserPreferences = outcome["updated_preferences"]
 
         self.conversation_manager.set_preferences(
@@ -182,17 +203,28 @@ class ConversationalAgent:
         )
 
         if outcome["validation_errors"]:
-            self.analytics.record_preference_collection(self._active_query_index, required=True, success=False)
+            self.analytics.record_preference_collection(
+                self._active_query_index, required=True, success=False
+            )
             return self.response_formatter.format_error_message(
                 "; ".join(outcome["validation_errors"])
             )
 
         if outcome["is_complete"]:
-            self.analytics.record_preference_collection(self._active_query_index, required=True, success=True)
-            return "Preferences updated successfully. " + self._format_preferences_view(updated)
+            self.analytics.record_preference_collection(
+                self._active_query_index, required=True, success=True
+            )
+            return "Preferences updated successfully. " + self._format_preferences_view(
+                updated
+            )
 
-        self.analytics.record_preference_collection(self._active_query_index, required=True, success=False)
-        next_question = outcome.get("next_question") or "Could you share a bit more preference detail?"
+        self.analytics.record_preference_collection(
+            self._active_query_index, required=True, success=False
+        )
+        next_question = (
+            outcome.get("next_question")
+            or "Could you share a bit more preference detail?"
+        )
         return self.response_formatter.format_clarification_prompt(next_question)
 
     async def _execute_tool_calls(self, tool_calls: List[ToolCall]) -> Dict[str, Any]:
@@ -238,7 +270,9 @@ class ConversationalAgent:
         if intent == IntentType.MARKET_OVERVIEW:
             market_data = tool_results.get("get_market_indices", {})
             if isinstance(market_data, dict) and market_data.get("error"):
-                return self.response_formatter.format_error_message(market_data["error"])
+                return self.response_formatter.format_error_message(
+                    market_data["error"]
+                )
             return self.response_formatter.format_market_overview(market_data)
 
         if intent in {IntentType.SECTOR_INFO, IntentType.SECTOR_RECOMMENDATIONS}:
@@ -269,7 +303,9 @@ class ConversationalAgent:
             details = tool_results.get("get_stock_details", {})
             price = tool_results.get("get_stock_price", {})
             if details.get("error") and price.get("error"):
-                return self.response_formatter.format_error_message(details.get("error"))
+                return self.response_formatter.format_error_message(
+                    details.get("error")
+                )
 
             ticker = details.get("ticker") or price.get("ticker") or "N/A"
             name = details.get("name", "")

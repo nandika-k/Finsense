@@ -115,7 +115,9 @@ class ToolRouter:
             if requires_preferences:
                 self._check_preference_requirement(tool_name, preferences)
 
-            arguments = self._build_tool_arguments(tool_name, classification, preferences)
+            arguments = self._build_tool_arguments(
+                tool_name, classification, preferences
+            )
             tool_call = ToolCall(
                 tool_name=tool_name,
                 server=TOOL_REGISTRY[tool_name]["server"],
@@ -135,7 +137,9 @@ class ToolRouter:
         required_args = TOOL_REGISTRY[tool_call.tool_name]["required_args"]
         for arg in required_args:
             if arg not in tool_call.arguments:
-                raise ValueError(f"Missing required argument '{arg}' for tool '{tool_call.tool_name}'")
+                raise ValueError(
+                    f"Missing required argument '{arg}' for tool '{tool_call.tool_name}'"
+                )
 
             value = tool_call.arguments[arg]
             if value is None or value == "" or value == []:
@@ -158,7 +162,9 @@ class ToolRouter:
         primary_sector = entities.sectors[0] if entities.sectors else None
         primary_goal = entities.goals[0] if entities.goals else None
 
-        pref_sector = preferences.sectors[0] if preferences and preferences.sectors else None
+        pref_sector = (
+            preferences.sectors[0] if preferences and preferences.sectors else None
+        )
         pref_goal = preferences.goals[0] if preferences and preferences.goals else None
 
         if tool_name == "get_market_indices":
@@ -212,12 +218,14 @@ class ToolRouter:
 
         if tool_name == "conduct_research":
             return {
-                "sectors": entities.sectors or (preferences.sectors if preferences else []),
+                "sectors": entities.sectors
+                or (preferences.sectors if preferences else []),
                 "risk_tolerance": (
                     entities.risk_tolerance
                     or (preferences.risk_tolerance if preferences else None)
                 ),
-                "investment_goals": entities.goals or (preferences.goals if preferences else []),
+                "investment_goals": entities.goals
+                or (preferences.goals if preferences else []),
             }
 
         return {}

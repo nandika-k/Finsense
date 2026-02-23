@@ -93,7 +93,9 @@ def mode_specific_instructions(mode: AppMode) -> str:
     )
 
 
-def handle_mode_switch_command(user_input: str, current_mode: AppMode) -> Optional[ModeSwitchResult]:
+def handle_mode_switch_command(
+    user_input: str, current_mode: AppMode
+) -> Optional[ModeSwitchResult]:
     """
     Handle mid-conversation mode switch commands.
 
@@ -106,7 +108,13 @@ def handle_mode_switch_command(user_input: str, current_mode: AppMode) -> Option
     value = (user_input or "").strip().lower()
 
     chat_commands = {"/chat", "switch to chat", "chat mode"}
-    batch_commands = {"/batch", "/research", "switch to batch", "research mode", "batch mode"}
+    batch_commands = {
+        "/batch",
+        "/research",
+        "switch to batch",
+        "research mode",
+        "batch mode",
+    }
 
     if value in chat_commands:
         return switch_to_conversational(current_mode)

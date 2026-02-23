@@ -46,14 +46,18 @@ class ConversationAnalytics:
             return
         record.intent = intent
 
-    def record_tool_calls(self, query_index: Optional[int], tool_calls_count: int) -> None:
+    def record_tool_calls(
+        self, query_index: Optional[int], tool_calls_count: int
+    ) -> None:
         """Record number of tool calls routed for a query."""
         record = self._safe_get(query_index)
         if record is None:
             return
         record.tool_calls = max(0, int(tool_calls_count))
 
-    def record_response_time(self, query_index: Optional[int], elapsed_ms: float) -> None:
+    def record_response_time(
+        self, query_index: Optional[int], elapsed_ms: float
+    ) -> None:
         """Record end-to-end response time for a query."""
         record = self._safe_get(query_index)
         if record is None:
@@ -86,10 +90,14 @@ class ConversationAnalytics:
 
         total_queries = len(self._records)
         total_tool_calls = sum(r.tool_calls for r in self._records)
-        response_times = [r.response_time_ms for r in self._records if r.response_time_ms is not None]
+        response_times = [
+            r.response_time_ms for r in self._records if r.response_time_ms is not None
+        ]
 
         pref_required = [r for r in self._records if r.required_preferences]
-        pref_success = [r for r in pref_required if r.preference_collection_success is True]
+        pref_success = [
+            r for r in pref_required if r.preference_collection_success is True
+        ]
 
         avg_conversation_length = (
             sum(self._conversation_lengths) / len(self._conversation_lengths)
@@ -98,9 +106,7 @@ class ConversationAnalytics:
         )
 
         avg_response_time_ms = (
-            sum(response_times) / len(response_times)
-            if response_times
-            else 0.0
+            sum(response_times) / len(response_times) if response_times else 0.0
         )
 
         return {
@@ -110,7 +116,9 @@ class ConversationAnalytics:
             "tool_calls_per_conversation": total_tool_calls,
             "average_conversation_length": round(avg_conversation_length, 2),
             "preference_collection_success_rate": (
-                round(len(pref_success) / len(pref_required), 4) if pref_required else None
+                round(len(pref_success) / len(pref_required), 4)
+                if pref_required
+                else None
             ),
             "average_response_time_ms": round(avg_response_time_ms, 2),
             "uptime_seconds": round(time.time() - self.started_at, 2),

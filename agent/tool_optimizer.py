@@ -7,7 +7,7 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
 from agent.tool_router import ToolCall
 
@@ -21,7 +21,11 @@ class _CacheEntry:
 class ToolCache:
     """Simple in-memory cache with TTL and hit/miss tracking."""
 
-    def __init__(self, default_ttl_seconds: int = 300, now_fn: Optional[Callable[[], float]] = None):
+    def __init__(
+        self,
+        default_ttl_seconds: int = 300,
+        now_fn: Optional[Callable[[], float]] = None,
+    ):
         self.default_ttl_seconds = default_ttl_seconds
         self._now_fn = now_fn or time.time
         self._entries: Dict[str, _CacheEntry] = {}
@@ -43,7 +47,9 @@ class ToolCache:
             "tool_name": tool_name,
             "arguments": normalized,
         }
-        serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+        serialized = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), default=str
+        )
         return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
     def get(self, key: str) -> Optional[Any]:
@@ -96,11 +102,15 @@ class ToolOptimizer:
         "get_stock_price": "ticker",
     }
 
-    def __init__(self, cache: Optional[ToolCache] = None, default_ttl_seconds: int = 300):
+    def __init__(
+        self, cache: Optional[ToolCache] = None, default_ttl_seconds: int = 300
+    ):
         self.cache = cache or ToolCache(default_ttl_seconds=default_ttl_seconds)
         self.default_ttl_seconds = default_ttl_seconds
 
-    def detect_batch_requests(self, tool_calls: Sequence[ToolCall]) -> List[Dict[str, Any]]:
+    def detect_batch_requests(
+        self, tool_calls: Sequence[ToolCall]
+    ) -> List[Dict[str, Any]]:
         """Detect groups of similar calls that could be batched by the backend."""
         grouped: Dict[tuple[str, str], List[ToolCall]] = {}
 
@@ -112,7 +122,9 @@ class ToolOptimizer:
             arguments_wo_batch = {
                 k: v for k, v in call.arguments.items() if k != batch_arg
             }
-            base_key = json.dumps(self.cache._normalize(arguments_wo_batch), sort_keys=True, default=str)
+            base_key = json.dumps(
+                self.cache._normalize(arguments_wo_batch), sort_keys=True, default=str
+            )
             grouped.setdefault((call.tool_name, base_key), []).append(call)
 
         batches: List[Dict[str, Any]] = []
@@ -120,7 +132,11 @@ class ToolOptimizer:
             if len(calls) < 2:
                 continue
             batch_arg = self._BATCHABLE_ARGS[tool_name]
-            batch_values = [call.arguments.get(batch_arg) for call in calls if call.arguments.get(batch_arg)]
+            batch_values = [
+                call.arguments.get(batch_arg)
+                for call in calls
+                if call.arguments.get(batch_arg)
+            ]
             if len(batch_values) < 2:
                 continue
             batches.append(
@@ -150,7 +166,11 @@ class ToolOptimizer:
 
             result = await invoke_tool(call)
             if not self._is_error(result):
-                self.cache.set(cache_key, result, ttl_seconds=self._cache_ttl_for_tool(call.tool_name))
+                self.cache.set(
+                    cache_key,
+                    result,
+                    ttl_seconds=self._cache_ttl_for_tool(call.tool_name),
+                )
             return call.tool_name, result
 
         pairs = await asyncio.gather(*(execute_one(call) for call in tool_calls))

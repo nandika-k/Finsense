@@ -106,7 +106,10 @@ class ClarificationHandler:
         spelling_corrections = self.suggest_spelling_corrections(query)
         if spelling_corrections:
             suggestion_text = ", ".join(
-                [f"'{original}' -> '{suggested}'" for original, suggested in spelling_corrections.items()]
+                [
+                    f"'{original}' -> '{suggested}'"
+                    for original, suggested in spelling_corrections.items()
+                ]
             )
             return ClarificationDecision(
                 needs_clarification=True,
@@ -137,7 +140,9 @@ class ClarificationHandler:
                 needs_clarification=True,
                 clarification_type="missing_params",
                 missing_params=missing,
-                message=self._clarification_templates["missing_params"].format(missing=missing_text),
+                message=self._clarification_templates["missing_params"].format(
+                    missing=missing_text
+                ),
             )
 
         return ClarificationDecision(needs_clarification=False)
@@ -162,9 +167,19 @@ class ClarificationHandler:
             token_upper = token.upper()
             if token_upper in self._known_tickers:
                 continue
-            if token.lower() in {"stock", "stocks", "sector", "sectors", "show", "about", "with"}:
+            if token.lower() in {
+                "stock",
+                "stocks",
+                "sector",
+                "sectors",
+                "show",
+                "about",
+                "with",
+            }:
                 continue
-            close = get_close_matches(token_upper, list(self._known_tickers), n=1, cutoff=0.7)
+            close = get_close_matches(
+                token_upper, list(self._known_tickers), n=1, cutoff=0.7
+            )
             if close:
                 corrections[token] = close[0]
 
@@ -200,12 +215,18 @@ class ClarificationHandler:
             return {
                 "resolved": bool(entities),
                 "entities": entities,
-                "follow_up": None if entities else "Please provide a sector or ticker to proceed.",
+                "follow_up": (
+                    None
+                    if entities
+                    else "Please provide a sector or ticker to proceed."
+                ),
             }
 
         if pending_clarification.clarification_type == "spelling_correction":
             negation = bool(re.search(r"\b(no|nope|not|wrong|incorrect)\b", response))
-            affirmative = not negation and bool(re.search(r"\b(yes|yep|correct|right|sure)\b", response))
+            affirmative = not negation and bool(
+                re.search(r"\b(yes|yep|correct|right|sure)\b", response)
+            )
             if affirmative and pending_clarification.corrections:
                 first_fix = next(iter(pending_clarification.corrections.values()))
                 return {
@@ -218,7 +239,11 @@ class ClarificationHandler:
             return {
                 "resolved": bool(extracted_sector),
                 "entities": {"sector": extracted_sector} if extracted_sector else {},
-                "follow_up": None if extracted_sector else "Please confirm the corrected sector/ticker.",
+                "follow_up": (
+                    None
+                    if extracted_sector
+                    else "Please confirm the corrected sector/ticker."
+                ),
             }
 
         if pending_clarification.clarification_type == "out_of_scope":
@@ -254,7 +279,9 @@ class ClarificationHandler:
         ]
         return any(re.search(pattern, query) for pattern in timing_advice_patterns)
 
-    def _find_ambiguous_sector(self, lowered_query: str) -> Optional[tuple[str, List[str]]]:
+    def _find_ambiguous_sector(
+        self, lowered_query: str
+    ) -> Optional[tuple[str, List[str]]]:
         """Return ambiguous term and candidates if query uses broad sector language."""
         for term, candidates in self._ambiguous_sector_terms.items():
             if re.search(rf"\b{re.escape(term)}\b", lowered_query):
@@ -264,7 +291,9 @@ class ClarificationHandler:
 
     def _detect_missing_critical_params(self, lowered_query: str) -> List[str]:
         """Detect missing minimum parameters for stock-centric requests."""
-        has_stock_request = bool(re.search(r"\b(stock|stocks|equities|shares)\b", lowered_query))
+        has_stock_request = bool(
+            re.search(r"\b(stock|stocks|equities|shares)\b", lowered_query)
+        )
         has_sector = self._extract_sector(lowered_query) is not None
         has_ticker = self._extract_ticker(lowered_query) is not None
 
