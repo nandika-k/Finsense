@@ -11,6 +11,7 @@ Main orchestrator for chat-mode interactions:
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -54,6 +55,9 @@ class ConversationalAgent:
 
         self._initialized = False
         self._active_query_index: Optional[int] = None
+        self._pending_preference_fields: Optional[List[str]] = None
+        self._pending_intent: Optional[IntentClassification] = None
+        self._awaiting_pending_confirmation: bool = False
 
     async def initialize(self) -> None:
         """Initialize tool coordinator connections."""
@@ -95,6 +99,7 @@ class ConversationalAgent:
                 user_query=user_message,
                 base_response=response,
                 history=self.conversation_manager.get_full_history(),
+                include_followups=False,
             )
 
             self.conversation_manager.add_assistant_message(
@@ -129,6 +134,52 @@ class ConversationalAgent:
     ) -> str:
         """Handle intent-specific paths before/after tool execution."""
         intent = classification.intent_type
+        current_preferences = self.conversation_manager.get_preferences()
+        raw_query = (classification.raw_query or "").strip().lower()
+
+        if "preferences" in raw_query and (
+            self._is_affirmative(raw_query)
+            or "those are my preferences" in raw_query
+            or "these are my preferences" in raw_query
+        ):
+            return "Got it. " + self._format_preferences_view(current_preferences)
+
+        # Fast-path: If user explicitly asks for stocks, skip to stock recommendations immediately
+        if re.search(r"\bstock\b|\bstocks\b", raw_query) and intent != IntentType.STOCK_RECOMMENDATIONS:
+            stock_classification = IntentClassification(
+                intent_type=IntentType.STOCK_RECOMMENDATIONS,
+                confidence=classification.confidence,
+                extracted_entities=classification.extracted_entities,
+                requires_preferences=False,  # Use defaults for quick stock picks
+                clarification_needed=False,
+                clarification_message=None,
+                raw_query=classification.raw_query,
+            )
+            return await self._execute_intent_with_tools(stock_classification)
+
+        if self._awaiting_pending_confirmation and self._pending_intent is not None:
+            if self._is_affirmative(raw_query):
+                self._awaiting_pending_confirmation = False
+                pending = self._pending_intent
+                self._pending_intent = None
+                return await self._execute_intent_with_tools(pending)
+            if self._is_negative(raw_query):
+                self._awaiting_pending_confirmation = False
+                self._pending_intent = None
+                return "Understood — I won't run that yet. Ask for anything else when you're ready."
+
+        # If user replied with preference-like content while we were clarifying,
+        # continue preference collection instead of hitting another roadblock.
+        if classification.clarification_needed:
+            parsed_preferences = self.preference_collector.parse_preference_response(
+                classification.raw_query
+            )
+            if (
+                parsed_preferences.goals
+                or parsed_preferences.sectors
+                or parsed_preferences.risk_tolerance
+            ):
+                return self._handle_set_preferences(classification.raw_query)
 
         if classification.clarification_needed:
             prompt = (
@@ -153,20 +204,27 @@ class ConversationalAgent:
 
         if intent == IntentType.CLEAR_PREFERENCES:
             self.conversation_manager.clear_preferences()
+            self._pending_preference_fields = None
+            self._pending_intent = None
+            self._awaiting_pending_confirmation = False
             return "Your preferences have been cleared."
 
         if intent == IntentType.SET_PREFERENCES:
             return self._handle_set_preferences(classification.raw_query)
 
-        current_preferences = self.conversation_manager.get_preferences()
         if classification.requires_preferences:
+            required_fields = self._required_preference_fields(classification.intent_type)
             self.analytics.record_preference_collection(
                 self._active_query_index, required=True, success=None
             )
             missing = self.preference_collector.check_required_preferences(
-                current_preferences
+                current_preferences,
+                required_fields=required_fields,
             )
             if missing:
+                self._pending_preference_fields = required_fields
+                self._pending_intent = classification
+                self._awaiting_pending_confirmation = False
                 self.analytics.record_preference_collection(
                     self._active_query_index, required=True, success=False
                 )
@@ -174,24 +232,19 @@ class ConversationalAgent:
                     missing
                 )
                 return self.response_formatter.format_clarification_prompt(question)
+            self._pending_preference_fields = None
+            self._pending_intent = None
+            self._awaiting_pending_confirmation = False
 
-        tool_calls = self.tool_router.route_intent_to_tools(
-            classification,
-            preferences=current_preferences,
-        )
-
-        if not tool_calls:
-            self.analytics.record_tool_calls(self._active_query_index, 0)
-            return "I understood your request, but there is no tool action mapped for it yet."
-
-        tool_results = await self._execute_tool_calls(tool_calls)
-        return self._format_tool_results(classification, tool_results)
+        return await self._execute_intent_with_tools(classification)
 
     def _handle_set_preferences(self, user_message: str) -> str:
         """Collect/update preferences from a user message."""
         current = self.conversation_manager.get_preferences()
         outcome = self.preference_collector.collect_preferences_turn(
-            current, user_message
+            current,
+            user_message,
+            required_fields=self._pending_preference_fields,
         )
         updated: UserPreferences = outcome["updated_preferences"]
 
@@ -211,21 +264,105 @@ class ConversationalAgent:
             )
 
         if outcome["is_complete"]:
+            self._pending_preference_fields = None
             self.analytics.record_preference_collection(
                 self._active_query_index, required=True, success=True
             )
-            return "Preferences updated successfully. " + self._format_preferences_view(
+            base = "Preferences updated successfully. " + self._format_preferences_view(
                 updated
             )
+            if self._pending_intent is not None:
+                self._awaiting_pending_confirmation = True
+                return (
+                    base
+                    + "\n\nSay 'yes' to continue with your previous request, or 'no' to skip."
+                )
+            return base
 
         self.analytics.record_preference_collection(
             self._active_query_index, required=True, success=False
         )
+        if self._pending_preference_fields is None:
+            self._pending_preference_fields = [
+                field
+                for field in ["goals", "sectors", "risk_tolerance"]
+                if field in outcome["missing_fields"]
+            ]
         next_question = (
             outcome.get("next_question")
             or "Could you share a bit more preference detail?"
         )
         return self.response_formatter.format_clarification_prompt(next_question)
+
+    async def _execute_intent_with_tools(
+        self,
+        classification: IntentClassification,
+    ) -> str:
+        """Route, execute, and format a classified intent with graceful preference fallback."""
+        current_preferences = self.conversation_manager.get_preferences()
+
+        try:
+            tool_calls = self.tool_router.route_intent_to_tools(
+                classification,
+                preferences=current_preferences,
+            )
+        except ValueError as exc:
+            error_text = str(exc).lower()
+            if "require" in error_text and "preference" in error_text:
+                required_fields = self._required_preference_fields(
+                    classification.intent_type
+                )
+                missing = self.preference_collector.check_required_preferences(
+                    current_preferences,
+                    required_fields=required_fields,
+                )
+                if missing:
+                    self._pending_intent = classification
+                    self._awaiting_pending_confirmation = False
+                    question = self.preference_collector.generate_preference_question(
+                        missing
+                    )
+                    return self.response_formatter.format_clarification_prompt(question)
+            raise
+
+        if not tool_calls:
+            self.analytics.record_tool_calls(self._active_query_index, 0)
+            return "I understood your request, but there is no tool action mapped for it yet."
+
+        # Handle multi-sector stock recommendations when sector="all"
+        for call in tool_calls:
+            if call.tool_name == "get_stock_recommendations" and call.arguments.get("sector") == "all":
+                return await self._execute_multi_sector_recommendations(call.arguments.get("goal", "growth"))
+
+        tool_results = await self._execute_tool_calls(tool_calls)
+        return self._format_tool_results(classification, tool_results)
+
+    async def _execute_multi_sector_recommendations(self, goal: str) -> str:
+        """Fetch stock recommendations from multiple sectors and combine results."""
+        sectors = ["technology", "healthcare", "financials", "energy", "consumer-discretionary"]
+        all_stocks = []
+        
+        for sector in sectors:
+            try:
+                method = getattr(self.coordinator, "get_stock_recommendations", None)
+                if method:
+                    result = await method(sector=sector, goal=goal)
+                    if isinstance(result, dict) and "stocks" in result:
+                        for stock in result["stocks"][:3]:  # Top 3 from each sector
+                            stock["sector"] = sector
+                            all_stocks.append(stock)
+            except Exception:
+                continue
+        
+        # Sort combined results by performance
+        if goal == "growth":
+            all_stocks.sort(key=lambda x: float(x.get("performance_1m", "0").rstrip("%")), reverse=True)
+        elif goal == "income":
+            all_stocks.sort(key=lambda x: x.get("dividend_yield", 0), reverse=True)
+        else:
+            all_stocks.sort(key=lambda x: float(x.get("performance_1m", "0").rstrip("%")), reverse=True)
+        
+        return self.response_formatter.format_multi_sector_recommendations(all_stocks[:10], goal)
 
     async def _execute_tool_calls(self, tool_calls: List[ToolCall]) -> Dict[str, Any]:
         """Execute routed tool calls through coordinator methods."""
@@ -312,16 +449,19 @@ class ConversationalAgent:
             current_price = price.get("price", details.get("price", "N/A"))
             perf_1m = details.get("performance_1m", "N/A")
             vol = details.get("volatility", "N/A")
-            return (
-                f"{ticker} {name}: current price {current_price}, 1M performance {perf_1m}, "
-                f"volatility {vol}."
-            )
+            
+            lines = [f"**📈 {ticker}** - {name}", ""]
+            lines.append(f"- **Price:** ${current_price}")
+            lines.append(f"- **1M Performance:** {perf_1m}")
+            lines.append(f"- **Volatility:** {vol}")
+            
+            return "\n".join(lines)
 
         if intent == IntentType.COMPARE:
             comparison = tool_results.get("compare_sectors", {})
             if comparison.get("error"):
                 return self.response_formatter.format_error_message(comparison["error"])
-            return f"Sector comparison completed: {comparison}"
+            return self.response_formatter.format_sector_comparison(comparison)
 
         if intent == IntentType.PORTFOLIO_ANALYSIS:
             var_data = tool_results.get("calculate_var", {})
@@ -362,3 +502,32 @@ class ConversationalAgent:
             f"- Sectors: {sectors}\n"
             f"- Risk tolerance: {risk}"
         )
+
+    @staticmethod
+    def _required_preference_fields(intent: IntentType) -> List[str]:
+        """Return preference fields required for a given preference-dependent intent."""
+        if intent == IntentType.STOCK_RECOMMENDATIONS:
+            return []  # Use defaults - no preferences required for quick stock picks
+        if intent == IntentType.FULL_RESEARCH:
+            return ["goals", "sectors", "risk_tolerance"]
+        if intent == IntentType.SECTOR_RECOMMENDATIONS:
+            return ["goals", "risk_tolerance"]
+        return ["goals", "sectors", "risk_tolerance"]
+
+    @staticmethod
+    def _is_affirmative(text: str) -> bool:
+        return text in {
+            "yes",
+            "y",
+            "yep",
+            "yeah",
+            "sure",
+            "ok",
+            "okay",
+            "yes please",
+            "yes those are my preferences",
+        }
+
+    @staticmethod
+    def _is_negative(text: str) -> bool:
+        return text in {"no", "n", "nope", "not now", "skip"}

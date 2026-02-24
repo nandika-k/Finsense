@@ -148,12 +148,16 @@ async def get_llm_response(
     # Switch to guided report mode only when explicitly requested.
     message_text = (user_input or "").strip()
     lowered = message_text.lower()
+    
+    # Only these explicit triggers enter guided mode
     guided_switches = {
         "/report",
         "/guided",
         "guided mode",
         "research mode",
         "full report",
+        "run full analysis",
+        "full analysis",
     }
     chat_switches = {"/chat", "chat mode", "conversational mode"}
 
@@ -172,24 +176,35 @@ async def get_llm_response(
         preferences["sectors"] = None
         preferences["risk_tolerance"] = None
         return {
-            "bot_message": "Switched to guided report mode. " + get_welcome_message(),
-            "state": "collecting_initial",
+            "bot_message": "Switched to guided report mode.\n\n" + format_goals_question(),
+            "state": "collecting_goals",
             "data": {},
         }
 
-    if message_text and state in {"initial", "conversational"}:
-        agent = get_or_create_conversational_agent(session_id)
-        bot_message = await agent.process_message(message_text)
-        return {
-            "bot_message": bot_message,
-            "state": "conversational",
-            "data": {},
-        }
+    # CONVERSATIONAL MODE: Route ALL messages through conversational agent
+    # unless we're in the middle of the guided flow
+    if state not in {"collecting_goals", "collecting_sectors", "collecting_risk", "confirming", "ready_to_research"}:
+        if message_text:
+            agent = get_or_create_conversational_agent(session_id)
+            bot_message = await agent.process_message(message_text)
+            return {
+                "bot_message": bot_message,
+                "state": "conversational",
+                "data": {},
+            }
+        else:
+            # Empty input - return welcome message
+            return {
+                "bot_message": get_welcome_message(),
+                "state": "conversational",
+                "data": {}
+            }
 
     if is_stock_focused_request(user_input):
         session["analysis_mode"] = "stock_picks"
     
-    # Initial state - welcome message
+    # GUIDED MODE: Only reach here if in middle of guided flow
+    # Initial state - welcome message (legacy fallback)
     if state == "initial":
         # Try to parse everything from initial input
         if user_input.strip():
@@ -973,7 +988,9 @@ async def chat(request: ChatMessage, user: Dict[str, Any] = Depends(get_current_
     Handle chat messages and guide conversation.
     """
     # Get or create session
-    session_id = request.session_id or create_session()
+    session_id = request.session_id
+    if not session_id or session_id not in sessions:
+        session_id = create_session()
     session = sessions[session_id]
     
     # Add user message to history

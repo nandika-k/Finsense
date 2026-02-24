@@ -11,6 +11,8 @@ Uses Groq LLM for semantic understanding of natural language inputs.
 
 import os
 import json
+import re
+from difflib import get_close_matches
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
 
@@ -85,6 +87,120 @@ INVESTMENT_GOALS = {
 RISK_TOLERANCE_LEVELS = ["low", "medium", "high"]
 
 
+def _extract_json_object(raw_text: str) -> Optional[Dict[str, Any]]:
+    """Extract and parse the first JSON object from model output."""
+    text = (raw_text or "").strip()
+    if not text:
+        return None
+
+    if text.startswith("```"):
+        lines = text.split("\n")
+        text = "\n".join(lines[1:-1]).strip()
+    if text.startswith("json"):
+        text = text[4:].strip()
+
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    match = re.search(r"\{[\s\S]*\}", text)
+    if not match:
+        return None
+
+    try:
+        parsed = json.loads(match.group(0))
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
+def _parse_initial_query_rule_based(user_input: str) -> Dict[str, Any]:
+    """Best-effort parser when LLM is unavailable or parsing fails."""
+    text = (user_input or "").strip().lower()
+    tokens = re.findall(r"[a-z\-]+", text)
+
+    goal_aliases = {
+        "growth": ["growth", "grow", "momentum"],
+        "income": ["income", "dividend", "yield", "cashflow"],
+        "esg": ["esg", "sustainable", "environment", "ethical"],
+        "value": ["value", "undervalued"],
+        "defensive": ["defensive", "safe", "stability", "stable"],
+        "diversified": ["diversified", "diversification", "balanced", "broad"],
+    }
+
+    sector_aliases = {
+        "technology": ["technology", "tech"],
+        "healthcare": ["healthcare", "health care", "health"],
+        "financial-services": ["financial", "finance", "financial services", "bank"],
+        "energy": ["energy", "oil", "gas"],
+        "consumer": ["consumer"],
+        "consumer-discretionary": ["consumer discretionary", "discretionary"],
+        "consumer-staples": ["consumer staples", "staples"],
+        "utilities": ["utilities", "utility"],
+        "real-estate": ["real estate", "real-estate", "reit"],
+        "industrials": ["industrials", "industrial"],
+        "materials": ["materials", "material"],
+        "communication-services": ["communication services", "communications", "telecom"],
+    }
+
+    goals = []
+    for goal, aliases in goal_aliases.items():
+        if any(alias in text for alias in aliases):
+            goals.append(goal)
+
+    # Fuzzy goal detection for common typos (e.g., "grwoth" -> "growth")
+    canonical_goals = list(goal_aliases.keys())
+    for token in tokens:
+        close = get_close_matches(token, canonical_goals, n=1, cutoff=0.8)
+        if close and close[0] not in goals:
+            goals.append(close[0])
+
+    sectors = []
+    for sector, aliases in sector_aliases.items():
+        if any(alias in text for alias in aliases):
+            sectors.append(sector)
+
+    risk_tolerance = None
+    if re.search(r"\blow\b|\bconservative\b|\bsafe\b", text):
+        risk_tolerance = "low"
+    elif re.search(r"\bmedium\b|\bmoderate\b|\bbalanced\b", text):
+        risk_tolerance = "medium"
+    elif re.search(r"\bhigh\b|\baggressive\b", text):
+        risk_tolerance = "high"
+
+    result = {
+        "goals": goals or None,
+        "sectors": sectors or None,
+        "risk_tolerance": risk_tolerance,
+        "needs_clarification": False,
+        "clarification_message": None,
+        "confidence": "medium",
+    }
+
+    stock_intent = bool(
+        re.search(r"\bstock\b|\bstocks\b|\bshares\b|\bpicks\b", text)
+    )
+
+    if not (result["goals"] or result["sectors"] or result["risk_tolerance"]):
+        result["needs_clarification"] = True
+        if stock_intent:
+            result["clarification_message"] = (
+                "Got it — you want stock ideas. Tell me either a goal "
+                "(growth, income, ESG, value) or a sector (like technology or healthcare), "
+                "and optionally your risk tolerance (low/medium/high)."
+            )
+        else:
+            result["clarification_message"] = (
+                "I can help with goals, sectors, and risk tolerance. "
+                "For example: 'growth in technology with medium risk'."
+            )
+        result["confidence"] = "low"
+
+    return result
+
+
 def parse_initial_query(user_input: str) -> Dict[str, Any]:
     """
     Parse an initial open-ended query for goals, sectors, and risk tolerance using LLM.
@@ -100,15 +216,7 @@ def parse_initial_query(user_input: str) -> Dict[str, Any]:
     llm_client = get_llm_client()
 
     if not llm_client:
-        # Fallback: return needs clarification
-        return {
-            "goals": None,
-            "sectors": None,
-            "risk_tolerance": None,
-            "needs_clarification": True,
-            "clarification_message": "I'd be happy to help! Could you tell me about your investment goals, preferred sectors, or risk tolerance?",
-            "confidence": "low",
-        }
+        return _parse_initial_query_rule_based(user_input)
 
     # Use LLM for comprehensive parsing with confidence assessment
     try:
@@ -158,24 +266,16 @@ Result: {{"goals": null, "sectors": null, "risk_tolerance": null, "confidence": 
 
 JSON object:"""
 
-        response = llm_client.chat.completions.create(
+        from agent.llm_utils import call_llm
+        content = call_llm(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             max_tokens=400,
         )
-
-        content = response.choices[0].message.content.strip()
-
-        # Remove markdown code blocks
-        if content.startswith("```"):
-            lines = content.split("\n")
-            content = "\n".join(lines[1:-1]).strip()
-
-        if content.startswith("json"):
-            content = content[4:].strip()
-
-        parsed = json.loads(content)
+        parsed = _extract_json_object(content)
+        if not parsed:
+            return _parse_initial_query_rule_based(user_input)
 
         # Validate and clean the parsed data
         result = {
@@ -201,19 +301,17 @@ JSON object:"""
         if parsed.get("risk_tolerance") in ["low", "medium", "high"]:
             result["risk_tolerance"] = parsed["risk_tolerance"]
 
+        if result["goals"] or result["sectors"] or result["risk_tolerance"]:
+            result["needs_clarification"] = False
+            if not result["clarification_message"]:
+                result["clarification_message"] = None
+
         return result
 
     except Exception as e:
         if os.getenv("DEBUG_CHATBOT"):
             print(f"[DEBUG] LLM parsing error: {e}")
-        return {
-            "goals": None,
-            "sectors": None,
-            "risk_tolerance": None,
-            "needs_clarification": True,
-            "clarification_message": "I didn't quite catch that. Could you tell me more about what you're looking for?",
-            "confidence": "low",
-        }
+        return _parse_initial_query_rule_based(user_input)
 
 
 def detect_user_intent(client: Any, user_input: str, context: str) -> str:
@@ -244,14 +342,13 @@ Classify as ONE of these intents:
 
 Return ONLY the intent word, nothing else."""
 
-        response = client.chat.completions.create(
+        from agent.llm_utils import call_llm
+        intent = call_llm(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             max_tokens=10,
-        )
-
-        intent = response.choices[0].message.content.strip().lower()
+        ).lower()
 
         # Validate response
         if intent in ["delegate", "specify", "help", "unclear"]:
@@ -265,19 +362,10 @@ Return ONLY the intent word, nothing else."""
         return "unclear"
 
 
-def get_llm_client() -> Optional[Any]:
-    """Get Groq client if API key is available"""
-    if not HAS_GROQ:
-        return None
-
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        return None
-
-    try:
-        return Groq(api_key=api_key)
-    except Exception:
-        return None
+def get_llm_client() -> bool:
+    """Return True if any LLM client is available"""
+    from agent.llm_utils import get_groq_client, get_fallback_client
+    return get_groq_client() is not None or get_fallback_client() is not None
 
 
 def parse_sectors_with_llm(client: Any, user_input: str) -> Optional[List[str]]:
@@ -317,33 +405,32 @@ User input: "{user_input}"
 Instructions:
 - Understand synonyms, abbreviations, and related industry terms
 - If user says "all" or "everything", return ALL sectors
-- If user mentions specific companies, map them to their sectors (e.g., Apple → technology)
-- Be flexible with phrasing (e.g., "tech stocks" → technology)
-- Handle multiple sectors (e.g., "tech and healthcare" → ["technology", "healthcare"])
+- If user mentions specific companies, map them to their sectors (e.g., Apple -> technology)
+- Be flexible with phrasing (e.g., "tech stocks" -> technology)
+- Handle multiple sectors (e.g., "tech and healthcare" -> ["technology", "healthcare"])
 - Only return sector names from the valid list above
 
 Return ONLY a JSON array of sector names (use the exact names from the valid list).
 
 Examples:
-"tech and pharma" → ["technology", "healthcare"]
-"banks and insurance" → ["financial-services"]
-"renewable energy and EVs" → ["energy", "consumer-discretionary"]
-"software companies" → ["technology"]
-"retail and e-commerce" → ["consumer"]
-"all sectors" → [all 12 sectors listed]
-"defensive stocks" → ["utilities", "consumer-staples", "healthcare"]
-"growth sectors" → ["technology", "healthcare", "communication-services"]
+"tech and pharma" -> ["technology", "healthcare"]
+"banks and insurance" -> ["financial-services"]
+"renewable energy and EVs" -> ["energy", "consumer-discretionary"]
+"software companies" -> ["technology"]
+"retail and e-commerce" -> ["consumer"]
+"all sectors" -> [all 12 sectors listed]
+"defensive stocks" -> ["utilities", "consumer-staples", "healthcare"]
+"growth sectors" -> ["technology", "healthcare", "communication-services"]
 
 JSON array:"""
 
-        response = client.chat.completions.create(
+        from agent.llm_utils import call_llm
+        content = call_llm(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,  # Slightly higher for better synonym matching
             max_tokens=300,
         )
-
-        content = response.choices[0].message.content.strip()
 
         # Debug output
         if os.getenv("DEBUG_CHATBOT"):
@@ -413,14 +500,13 @@ Examples:
 
 JSON array:"""
 
-        response = client.chat.completions.create(
+        from agent.llm_utils import call_llm
+        content = call_llm(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             max_tokens=200,
         )
-
-        content = response.choices[0].message.content.strip()
 
         # Debug output
         if os.getenv("DEBUG_CHATBOT"):
@@ -572,19 +658,19 @@ User said: "{user_input}"
 Answer with ONLY "true" or "false".
 
 Examples:
-"whatever you think is best" → true
-"you decide" → true
-"up to you" → true
-"I trust your judgment" → true
-"you pick" → true
-"surprise me" → true
-"whatever you think" → true
-"your call" → true
-"you choose" → true
-"tech and healthcare" → false
-"1,2,3" → false
-"all sectors" → false
-"technology" → false
+"whatever you think is best" -> true
+"you decide" -> true
+"up to you" -> true
+"I trust your judgment" -> true
+"you pick" -> true
+"surprise me" -> true
+"whatever you think" -> true
+"your call" -> true
+"you choose" -> true
+"tech and healthcare" -> false
+"1,2,3" -> false
+"all sectors" -> false
+"technology" -> false
 
 Answer (true or false):"""
 
@@ -619,11 +705,11 @@ def collect_sector_preferences(suggested_sectors: List[str]) -> List[str]:
         print(f"  {idx:2d}. {sector}{marker}")
 
     if llm_client:
-        print("  ✓ Natural language - describe any way you want:")
+        print("  * Natural language - describe any way you want:")
         print("    'tech and pharma' / 'banks' / 'renewable energy and EVs'")
         print("    'defensive stocks' / 'growth sectors' / 'all but energy'")
         if suggested_sectors:
-            print("  ✓ Build on suggestions: 'suggested plus energy and materials'")
+            print("  * Build on suggestions: 'suggested plus energy and materials'")
 
     while True:
         response = input("\nYour choice: ").strip()
@@ -702,10 +788,10 @@ def collect_sector_preferences(suggested_sectors: List[str]) -> List[str]:
             combined_sectors = suggested_sectors.copy()
             if additional_sectors:
                 combined_sectors.extend(additional_sectors)
-                print("\n  ✓ Parsed your request:")
-                print(f"    • Suggested sectors: {', '.join(suggested_sectors)}")
-                print(f"    • Plus additional: {', '.join(additional_sectors)}")
-                print(f"    • Total: {len(combined_sectors)} sectors")
+                print("\n  * Parsed your request:")
+                print(f"    - Suggested sectors: {', '.join(suggested_sectors)}")
+                print(f"    - Plus additional: {', '.join(additional_sectors)}")
+                print(f"    - Total: {len(combined_sectors)} sectors")
 
                 confirm = input("\n  Is this correct? (yes/no): ").strip().lower()
                 if confirm in ["yes", "y", ""]:
@@ -723,9 +809,9 @@ def collect_sector_preferences(suggested_sectors: List[str]) -> List[str]:
             parsed_sectors = parse_sectors_with_llm(llm_client, response)
 
             if parsed_sectors:
-                print("\n  ✓ Understood your request:")
-                print(f"    • Sectors: {', '.join(parsed_sectors)}")
-                print(f"    • Total: {len(parsed_sectors)} sectors")
+                print("\n  * Understood your request:")
+                print(f"    - Sectors: {', '.join(parsed_sectors)}")
+                print(f"    - Total: {len(parsed_sectors)} sectors")
 
                 confirm = input("\n  Is this correct? (yes/no): ").strip().lower()
                 if confirm in ["yes", "y", ""]:
@@ -753,8 +839,8 @@ def collect_sector_preferences(suggested_sectors: List[str]) -> List[str]:
                     print("  [!] Please select at least one sector")
                     continue
 
-                print(f"\n  ✓ Selected {len(selected_sectors)} sectors:")
-                print(f"    • {', '.join(selected_sectors)}")
+                print(f"\n  * Selected {len(selected_sectors)} sectors:")
+                print(f"    - {', '.join(selected_sectors)}")
 
                 confirm = input("\n  Proceed with these? (yes/no): ").strip().lower()
                 if confirm in ["yes", "y", ""]:
@@ -986,18 +1072,18 @@ def run_chatbot() -> Optional[Dict]:
                 print("EXAMPLE INPUTS")
                 print("=" * 80)
                 print("\nHere are some example inputs you can try:\n")
-                print("  • 'I want growth in technology with medium risk'")
-                print("  • 'ESG investing in healthcare and energy sectors'")
-                print("  • 'Low risk defensive strategy'")
+                print("  - 'I want growth in technology with medium risk'")
+                print("  - 'ESG investing in healthcare and energy sectors'")
+                print("  - 'Low risk defensive strategy'")
                 print(
-                    "  • 'Income focused on utilities and consumer staples, low risk'"
+                    "  - 'Income focused on utilities and consumer staples, low risk'"
                 )
                 print(
-                    "  • 'Technology and financial services with high risk tolerance'"
+                    "  - 'Technology and financial services with high risk tolerance'"
                 )
                 print("\nYou can also ask for:")
-                print("  • 'ideas' or 'help' - see available goal options")
-                print("  • 'what sectors' - see all available sectors")
+                print("  - 'ideas' or 'help' - see available goal options")
+                print("  - 'what sectors' - see all available sectors")
                 print("=" * 80)
                 continue  # Restart the loop to ask the question again
 
@@ -1032,17 +1118,17 @@ User input: "{initial_input}"
 Answer with ONLY "true" or "false".
 
 Examples:
-"what sectors are available" → true
-"show me sectors" → true
-"which sectors can I choose" → true
-"list all sectors" → true
-"what are my sector options" → true
-"sector ideas" → true
-"suggested sectors" → true
-"what sectors do you suggest" → true
-"I want tech stocks" → false
-"growth investing" → false
-"help" → false
+"what sectors are available" -> true
+"show me sectors" -> true
+"which sectors can I choose" -> true
+"list all sectors" -> true
+"what are my sector options" -> true
+"sector ideas" -> true
+"suggested sectors" -> true
+"what sectors do you suggest" -> true
+"I want tech stocks" -> false
+"growth investing" -> false
+"help" -> false
 
 Answer (true or false):"""
 
@@ -1065,14 +1151,14 @@ User input: "{initial_input}"
 Answer with ONLY "true" or "false".
 
 Examples:
-"what else do you need" → true
-"what else do you need to know" → true
-"what information do you need" → true
-"what's missing" → true
-"what do you need from me" → true
-"anything else" → true
-"esg low risk" → false
-"technology" → false
+"what else do you need" -> true
+"what else do you need to know" -> true
+"what information do you need" -> true
+"what's missing" -> true
+"what do you need from me" -> true
+"anything else" -> true
+"esg low risk" -> false
+"technology" -> false
 
 Answer (true or false):"""
                         resp2 = llm_client.chat.completions.create(
@@ -1134,9 +1220,9 @@ Answer (true or false):"""
                     missing.append("your risk tolerance (low/medium/high)")
 
                 if missing:
-                    print(f"\n  → I still need to know: {' and '.join(missing)}")
+                    print(f"\n  -> I still need to know: {' and '.join(missing)}")
                 else:
-                    print("\n  → I have all the information I need! Let me confirm...")
+                    print("\n  -> I have all the information I need! Let me confirm...")
                 continue
 
             if asking_for_sector_help:
@@ -1152,7 +1238,7 @@ Answer (true or false):"""
                     suggested = suggest_sectors_from_goals(goals)
                     if suggested:
                         print(
-                            f"\n  💡 Based on your goals, I suggest: {', '.join(suggested)}"
+                            f"\n  * Based on your goals, I suggest: {', '.join(suggested)}"
                         )
 
                 print("\n" + "=" * 80)
@@ -1186,9 +1272,9 @@ Answer (true or false):"""
                 understood.append(f"Risk: {parsed.get('risk_tolerance').upper()}")
 
             if understood:
-                print("\n  ✓ Understood:")
+                print("\n  * Understood:")
                 for item in understood:
-                    print(f"    • {item}")
+                    print(f"    - {item}")
                 shown_understood = True  # Mark that we've shown info
 
                 # If incomplete, prompt for what's missing instead of looping
@@ -1201,7 +1287,7 @@ Answer (true or false):"""
                         missing.append("risk tolerance")
 
                     if missing:
-                        print(f"\n  → What about {' and '.join(missing)}?")
+                        print(f"\n  -> What about {' and '.join(missing)}?")
                     continue  # Ask again for remaining info
             else:
                 # Nothing understood from this input - check if it's an affirmative
@@ -1227,7 +1313,7 @@ Answer (true or false):"""
                         if risk_tolerance is None:
                             missing.append("risk tolerance")
                         print(
-                            f"\n  → I still need to know your {' and '.join(missing)}."
+                            f"\n  -> I still need to know your {' and '.join(missing)}."
                         )
                         continue
                 # Otherwise, couldn't parse - will loop back to ask again

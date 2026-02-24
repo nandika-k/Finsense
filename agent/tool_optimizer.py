@@ -155,8 +155,20 @@ class ToolOptimizer:
         tool_calls: Sequence[ToolCall],
         invoke_tool: Callable[[ToolCall], Awaitable[Any]],
     ) -> Dict[str, Any]:
-        """Execute independent tool calls in parallel with cache awareness."""
+        """Execute tool calls with sequential execution for same-server calls.
+        
+        MCP stdio transport doesn't support concurrent requests on the same connection,
+        so tools targeting the same server must be executed sequentially to avoid
+        "readuntil() called while another coroutine is already waiting" errors.
+        Tools targeting different servers can still run in parallel.
+        """
         results: Dict[str, Any] = {}
+        
+        # Group tool calls by server to avoid concurrent MCP connection access
+        server_groups: Dict[str, List[ToolCall]] = {}
+        for call in tool_calls:
+            server = getattr(call, 'server', 'default')
+            server_groups.setdefault(server, []).append(call)
 
         async def execute_one(call: ToolCall) -> tuple[str, Any]:
             cache_key = self.cache.generate_key(call.tool_name, call.arguments)
@@ -173,9 +185,21 @@ class ToolOptimizer:
                 )
             return call.tool_name, result
 
-        pairs = await asyncio.gather(*(execute_one(call) for call in tool_calls))
-        for tool_name, result in pairs:
-            results[tool_name] = result
+        async def execute_server_group(calls: List[ToolCall]) -> List[tuple[str, Any]]:
+            """Execute all calls for one server sequentially."""
+            group_results = []
+            for call in calls:
+                result = await execute_one(call)
+                group_results.append(result)
+            return group_results
+
+        # Execute server groups in parallel, but calls within each group sequentially
+        group_tasks = [execute_server_group(calls) for calls in server_groups.values()]
+        all_group_results = await asyncio.gather(*group_tasks)
+        
+        for group_results in all_group_results:
+            for tool_name, result in group_results:
+                results[tool_name] = result
         return results
 
     def _cache_ttl_for_tool(self, tool_name: str) -> int:

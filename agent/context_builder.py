@@ -110,10 +110,17 @@ class ContextBuilder:
             return False
 
         prior_user_messages = [m for m in history if m.role == "user"]
-        for message in prior_user_messages:
+        skipped_current_turn = False
+        for message in reversed(prior_user_messages):
             previous = self._normalize_text(message.content)
             if not previous:
                 continue
+
+            # The active turn is already in history at call time; skip it.
+            if not skipped_current_turn and previous == normalized_query:
+                skipped_current_turn = True
+                continue
+
             ratio = SequenceMatcher(None, normalized_query, previous).ratio()
             if ratio >= threshold:
                 return True
@@ -221,13 +228,20 @@ class ContextBuilder:
                 + response
             )
 
-        llm_polish = self._build_contextualized_response_with_llm(
-            user_query=user_query,
-            base_response=response,
-            references=references,
-        )
-        if llm_polish:
-            response = llm_polish
+        # Only apply LLM polish for simple responses without structured data
+        # Skip for responses with URLs, stock data, or formatted sections to preserve accuracy
+        has_structured_data = any(marker in response for marker in [
+            "http", "://", "**", "|", "$", "%", "[", "]"
+        ])
+        
+        if not has_structured_data:
+            llm_polish = self._build_contextualized_response_with_llm(
+                user_query=user_query,
+                base_response=response,
+                references=references,
+            )
+            if llm_polish:
+                response = llm_polish
 
         if include_followups:
             follow_ups = self.generate_follow_up_suggestions(user_query, response)

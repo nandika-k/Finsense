@@ -565,29 +565,49 @@ def parse_timeframe_to_days(timeframe: str) -> int:
         return 7  # Default to 1 week
 
 def is_relevant_to_sector(title: str, description: str, keywords: Dict[str, List[str]]) -> tuple[bool, int]:
-    """Check if headline is relevant to sector with scoring - RELAXED thresholds"""
+    """Check if headline is relevant to sector with word boundary matching"""
     text = f"{title} {description}".lower()
     score = 0
+    matched_required = []
     
-    # Required keywords (must have at least one) - lower initial score requirement
-    required_match = any(kw.lower() in text for kw in keywords.get("required", []))
-    if not required_match:
+    # Required keywords - use word boundary matching to avoid false positives
+    for kw in keywords.get("required", []):
+        # Use word boundaries for keywords
+        pattern = r'\b' + re.escape(kw.lower()) + r'\b'
+        if re.search(pattern, text):
+            matched_required.append(kw)
+            score += 3  # 3 points per required match
+    
+    if not matched_required:
         return False, 0
-    score += 5  # Reduced from 10 to make it easier to pass
     
-    # Company mentions (high value)
-    company_matches = sum(1 for company in keywords.get("companies", []) if company.lower() in text)
+    # Company mentions (high value) - also use word boundaries
+    company_matches = 0
+    for company in keywords.get("companies", []):
+        pattern = r'\b' + re.escape(company.lower()) + r'\b'
+        if re.search(pattern, text):
+            company_matches += 1
     score += company_matches * 5
     
-    # Technical terms (medium value)
-    term_matches = sum(1 for term in keywords.get("terms", []) if term.lower() in text)
+    # Technical terms (medium value) - word boundary matching
+    term_matches = 0
+    for term in keywords.get("terms", []):
+        pattern = r'\b' + re.escape(term.lower()) + r'\b'
+        if re.search(pattern, text):
+            term_matches += 1
     score += term_matches * 2
     
-    # Description bonus (encourage articles with substance)
+    # Description bonus
     if len(description) > 100:
-        score += 2
+        score += 1
     
-    return score >= 5, score  # Lowered threshold from 10 to 5
+    # Relevance criteria - need strong sector signal:
+    # - Multiple required keywords (score >= 6) OR
+    # - One required + company match (score >= 8) OR
+    # - One required + 2+ term matches (score >= 7)
+    is_relevant = (len(matched_required) >= 2) or (company_matches >= 1) or (term_matches >= 2)
+    
+    return is_relevant and score >= 5, score
 
 def fetch_headlines_from_rss(sector: str, days: int, max_results: int = 20) -> List[Dict]:
     """
