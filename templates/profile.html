@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Finsense - Profile</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Finsense</h1>
+            <nav>
+                <a href="/">Home</a>
+                <a href="/logout">Log Out</a>
+            </nav>
+        </header>
+
+        <main>
+            <div class="profile-card">
+                <h2>Your Profile</h2>
+                
+                {% if session %}
+                    <div class="profile-info">
+                        {% if session.userinfo.picture %}
+                            <img src="{{ session.userinfo.picture }}" alt="Profile picture" class="profile-picture">
+                        {% endif %}
+                        
+                        <div class="profile-details">
+                            <p><strong>Name:</strong> {{ session.userinfo.name }}</p>
+                            <p><strong>Email:</strong> {{ session.userinfo.email }}</p>
+                            <p><strong>User ID:</strong> {{ session.userinfo.sub }}</p>
+                        </div>
+                    </div>
+                    
+                    <div class="token-info">
+                        <h3>Session Info</h3>
+                        <pre>{{ pretty | tojson(indent=2) }}</pre>
+                    </div>
+                {% else %}
+                    <p>Please <a href="/login">log in</a> to view your profile.</p>
+                {% endif %}
+            </div>
+        </main>
+
+        <footer>
+            <p>&copy; 2026 Finsense. All rights reserved.</p>
+        </footer>
+    </div>
+</body>
+</html>

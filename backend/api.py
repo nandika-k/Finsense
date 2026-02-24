@@ -53,6 +53,11 @@ app.add_middleware(
 sessions: Dict[str, Dict[str, Any]] = {}
 session_chat_agents: Dict[str, ConversationalAgent] = {}
 
+# User chat history storage (keyed by user_id)
+user_chat_history: Dict[str, List[Dict[str, Any]]] = {}
+user_sessions: Dict[str, List[str]] = {}  # Maps user_id to their session_ids
+MAX_HISTORY_MESSAGES = 100  # Limit messages per user
+
 
 # Request/Response Models
 class ChatMessage(BaseModel):
@@ -80,8 +85,20 @@ class ResearchResponse(BaseModel):
     results: Optional[Dict[str, Any]] = None
 
 
+class HistoryResponse(BaseModel):
+    user_id: str
+    messages: List[Dict[str, Any]]
+    total_count: int
+
+
+class ClearHistoryResponse(BaseModel):
+    user_id: str
+    cleared: bool
+    message: str
+
+
 # Helper Functions
-def create_session() -> str:
+def create_session(user_id: Optional[str] = None) -> str:
     """Create a new session with initial state"""
     session_id = str(uuid.uuid4())
     sessions[session_id] = {
@@ -94,9 +111,41 @@ def create_session() -> str:
         },
         "conversation_history": [],
         "research_data": None,
-        "created_at": datetime.now().isoformat()
+        "created_at": datetime.now().isoformat(),
+        "user_id": user_id
     }
+    
+    # Track user's sessions
+    if user_id:
+        if user_id not in user_sessions:
+            user_sessions[user_id] = []
+        user_sessions[user_id].append(session_id)
+    
     return session_id
+
+
+def get_user_id(user: Dict[str, Any]) -> str:
+    """Extract user ID from auth payload."""
+    return user.get("sub", "anonymous")
+
+
+def add_to_user_history(user_id: str, role: str, message: str) -> None:
+    """Add a message to user's chat history."""
+    if not user_id or user_id == "anonymous":
+        return  # Don't persist anonymous history
+    
+    if user_id not in user_chat_history:
+        user_chat_history[user_id] = []
+    
+    user_chat_history[user_id].append({
+        "role": role,
+        "message": message,
+        "timestamp": datetime.now().isoformat()
+    })
+    
+    # Trim history if exceeds limit
+    if len(user_chat_history[user_id]) > MAX_HISTORY_MESSAGES:
+        user_chat_history[user_id] = user_chat_history[user_id][-MAX_HISTORY_MESSAGES:]
 
 
 def get_or_create_conversational_agent(session_id: str) -> ConversationalAgent:
@@ -987,18 +1036,27 @@ async def chat(request: ChatMessage, user: Dict[str, Any] = Depends(get_current_
     """
     Handle chat messages and guide conversation.
     """
-    # Get or create session
+    user_id = get_user_id(user)
+    
+    # Get or create session (associated with user)
     session_id = request.session_id
     if not session_id or session_id not in sessions:
-        session_id = create_session()
+        session_id = create_session(user_id)
     session = sessions[session_id]
     
-    # Add user message to history
-    session["conversation_history"].append({
-        "role": "user",
-        "message": request.message,
-        "timestamp": datetime.now().isoformat()
-    })
+    # Ensure session is associated with user (for existing sessions)
+    if session.get("user_id") is None and user_id != "anonymous":
+        session["user_id"] = user_id
+    
+    # Add user message to session history
+    if request.message:
+        session["conversation_history"].append({
+            "role": "user",
+            "message": request.message,
+            "timestamp": datetime.now().isoformat()
+        })
+        # Also add to persistent user history
+        add_to_user_history(user_id, "user", request.message)
     
     # Process message based on state
     response_data = await get_llm_response(request.message, "", session, session_id)
@@ -1012,12 +1070,14 @@ async def chat(request: ChatMessage, user: Dict[str, Any] = Depends(get_current_
     if "data" in response_data and response_data["data"]:
         session["data"] = response_data["data"]
     
-    # Add bot message to history
+    # Add bot message to session history
     session["conversation_history"].append({
         "role": "bot",
         "message": response_data["bot_message"],
         "timestamp": datetime.now().isoformat()
     })
+    # Also add to persistent user history
+    add_to_user_history(user_id, "bot", response_data["bot_message"])
     
     return ChatResponse(
         session_id=session_id,
@@ -1098,6 +1158,88 @@ async def get_status(session_id: str, user: Dict[str, Any] = Depends(get_current
         "state": session["state"],
         "preferences": session["preferences"]
     }
+
+
+@app.get("/api/history", response_model=HistoryResponse)
+async def get_history(user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Get authenticated user's chat history.
+    Returns the last MAX_HISTORY_MESSAGES messages.
+    """
+    user_id = get_user_id(user)
+    
+    if user_id == "anonymous" or user.get("auth_disabled"):
+        return HistoryResponse(
+            user_id=user_id,
+            messages=[],
+            total_count=0
+        )
+    
+    messages = user_chat_history.get(user_id, [])
+    
+    return HistoryResponse(
+        user_id=user_id,
+        messages=messages,
+        total_count=len(messages)
+    )
+
+
+@app.post("/api/history/clear", response_model=ClearHistoryResponse)
+async def clear_history(user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Clear authenticated user's chat history.
+    """
+    user_id = get_user_id(user)
+    
+    if user_id == "anonymous" or user.get("auth_disabled"):
+        return ClearHistoryResponse(
+            user_id=user_id,
+            cleared=False,
+            message="Cannot clear history for anonymous users"
+        )
+    
+    # Clear user's chat history
+    if user_id in user_chat_history:
+        del user_chat_history[user_id]
+    
+    # Clear user's sessions
+    if user_id in user_sessions:
+        for session_id in user_sessions[user_id]:
+            if session_id in sessions:
+                sessions[session_id]["conversation_history"] = []
+                if session_id in session_chat_agents:
+                    del session_chat_agents[session_id]
+        user_sessions[user_id] = []
+    
+    return ClearHistoryResponse(
+        user_id=user_id,
+        cleared=True,
+        message="Chat history cleared successfully"
+    )
+
+
+@app.get("/api/sessions")
+async def get_user_sessions(user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Get all active sessions for the authenticated user.
+    """
+    user_id = get_user_id(user)
+    
+    if user_id == "anonymous" or user.get("auth_disabled"):
+        return {"user_id": user_id, "sessions": []}
+    
+    session_list = []
+    for session_id in user_sessions.get(user_id, []):
+        if session_id in sessions:
+            session = sessions[session_id]
+            session_list.append({
+                "session_id": session_id,
+                "state": session["state"],
+                "created_at": session["created_at"],
+                "message_count": len(session["conversation_history"])
+            })
+    
+    return {"user_id": user_id, "sessions": session_list}
 
 
 if __name__ == "__main__":

@@ -4,9 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Finsense - Financial Intelligence Assistant</title>
-    <link rel="stylesheet" href="chatbot_styles.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='chatbot_styles.css') }}">
 </head>
 <body>
+    {% if user %}
+    <!-- Authenticated: Show Finsense Chatbot -->
     <div class="container">
         <!-- Header -->
         <header class="header">
@@ -15,9 +17,8 @@
                 <p class="tagline">Build wealth with intelligence</p>
             </div>
             <div class="auth-controls">
-                <span id="authStatus" class="auth-status">Checking sign-in...</span>
-                <button id="loginButton" class="auth-button">Log In</button>
-                <button id="logoutButton" class="auth-button" style="display: none;">Log Out</button>
+                <span class="auth-status">Welcome, {{ user.name }}</span>
+                <a href="/logout" class="auth-button">Log Out</a>
             </div>
         </header>
 
@@ -70,63 +71,35 @@
         </footer>
     </div>
 
-    <!-- Login Modal -->
-    <div id="loginModal" class="modal-overlay" style="display: none;">
-        <div class="modal-container">
-            <button class="modal-close" id="modalCloseBtn" aria-label="Close">
+    <script>
+        // User is authenticated - pass user info to JS
+        window.FINSENSE_USER = {
+            sub: "{{ user.sub }}",
+            name: "{{ user.name }}",
+            email: "{{ user.email }}",
+            picture: "{{ user.picture }}"
+        };
+        window.FINSENSE_AUTH_MODE = "flask";
+    </script>
+    <script src="{{ url_for('static', filename='chatbot_script.js') }}"></script>
+
+    {% else %}
+    <!-- Not authenticated: Show Login Page -->
+    <div class="login-container">
+        <div class="login-card">
+            <div class="login-logo">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                    <path d="M2 17l10 5 10-5"/>
+                    <path d="M2 12l10 5 10-5"/>
                 </svg>
-            </button>
-            
-            <div class="modal-header">
-                <div class="modal-logo">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                        <path d="M2 17l10 5 10-5"/>
-                        <path d="M2 12l10 5 10-5"/>
-                    </svg>
-                </div>
-                <h2>Sign in to Finsense</h2>
-                <p>Access your personalized financial insights and chat history</p>
             </div>
-
-            <div class="modal-body">
-                <div id="loginStatus" class="login-status"></div>
-                
-                <button id="popupLoginBtn" class="modal-login-btn">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
-                        <polyline points="10 17 15 12 10 7"/>
-                        <line x1="15" y1="12" x2="3" y2="12"/>
-                    </svg>
-                    Continue with Auth0
-                </button>
-
-                <div class="modal-divider">
-                    <span>or</span>
-                </div>
-
-                <button id="guestContinueBtn" class="modal-guest-btn">
-                    Continue as Guest
-                </button>
-            </div>
-
-            <div class="modal-footer">
-                <p>By signing in, you agree to our Terms of Service and Privacy Policy.</p>
-            </div>
+            <h1>Finsense</h1>
+            <p class="tagline">Build wealth with intelligence</p>
+            <p class="login-desc">Sign in to access your personalized financial insights and chat history.</p>
+            <a href="/login" class="login-btn">Sign In with Auth0</a>
         </div>
     </div>
-
-    <script>
-        window.FINSENSE_AUTH0 = {
-            domain: "",
-            clientId: "",
-            audience: ""
-        };
-    </script>
-    <script src="https://cdn.auth0.com/js/auth0-spa-js/2.1/auth0-spa-js.production.js"></script>
-    <script src="chatbot_script.js"></script>
+    {% endif %}
 </body>
 </html>

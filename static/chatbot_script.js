@@ -11,7 +11,15 @@ const AUTH0_CONFIG = window.FINSENSE_AUTH0 || {
     audience: ''
 };
 
+// Check for Flask auth mode
+const FLASK_AUTH_MODE = window.FINSENSE_AUTH_MODE === 'flask';
+const FLASK_USER = window.FINSENSE_USER || null;
+
 function hasAuthConfig() {
+    // If Flask auth mode, consider auth enabled if user is present
+    if (FLASK_AUTH_MODE) {
+        return true;
+    }
     return Boolean(AUTH0_CONFIG.domain && AUTH0_CONFIG.clientId && AUTH0_CONFIG.audience);
 }
 
@@ -36,7 +44,7 @@ class ChatbotUI {
         this.logoutButton = document.getElementById('logoutButton');
         this.authStatus = document.getElementById('authStatus');
         
-        // Modal elements
+        // Modal elements (may not exist in Flask mode)
         this.loginModal = document.getElementById('loginModal');
         this.modalCloseBtn = document.getElementById('modalCloseBtn');
         this.popupLoginBtn = document.getElementById('popupLoginBtn');
@@ -76,8 +84,17 @@ class ChatbotUI {
     }
 
     async initializeAuth() {
+        // Flask session-based auth
+        if (FLASK_AUTH_MODE && FLASK_USER) {
+            this.isAuthenticated = true;
+            this.userId = FLASK_USER.sub;
+            this.setInputEnabled(true);
+            console.log('Flask auth: User authenticated as', FLASK_USER.name);
+            return;
+        }
+        
         if (!this.authEnabled) {
-            this.authStatus.textContent = 'Auth disabled (dev mode)';
+            if (this.authStatus) this.authStatus.textContent = 'Auth disabled (dev mode)';
             this.loginButton.style.display = 'none';
             this.logoutButton.style.display = 'none';
             this.setInputEnabled(true);
@@ -276,6 +293,11 @@ class ChatbotUI {
     }
 
     getHeaders() {
+        // Flask auth mode doesn't need Bearer token - session-based
+        if (FLASK_AUTH_MODE) {
+            return { 'Content-Type': 'application/json' };
+        }
+        
         if (this.authEnabled && !this.accessToken && !this.isGuest) {
             throw new Error('Please log in first.');
         }
@@ -322,8 +344,13 @@ class ChatbotUI {
     }
 
     initializeEventListeners() {
-        this.loginButton.addEventListener('click', () => this.login());
-        this.logoutButton.addEventListener('click', () => this.logout());
+        // Auth buttons (may not exist in Flask mode)
+        if (this.loginButton) {
+            this.loginButton.addEventListener('click', () => this.login());
+        }
+        if (this.logoutButton) {
+            this.logoutButton.addEventListener('click', () => this.logout());
+        }
 
         // Modal event listeners
         if (this.modalCloseBtn) {
