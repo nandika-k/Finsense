@@ -337,14 +337,6 @@ class ResponseFormatter:
             if headlines_data.get("error"):
                 lines.append(self.format_error_message(headlines_data["error"]))
             else:
-                sector = headlines_data.get("sector", "sector")
-                timeframe = headlines_data.get("timeframe", "recent period")
-                count = headlines_data.get("headline_count", 0)
-                lines.append(
-                    f"**Recent News for {sector.upper()}** ({timeframe}): {count} headlines analyzed."
-                )
-                lines.append("")
-
                 headlines = headlines_data.get("headlines", [])
                 logger.info(f"[DEBUG format_news_summary] Number of headlines: {len(headlines)}")
                 if headlines:
@@ -357,40 +349,40 @@ class ResponseFormatter:
                     title = item.get("title", "Untitled")
                     url = item.get("url", "")
                     sentiment = item.get("sentiment", "neutral")
-                    source = item.get("source", "")
                     
-                    # Format with clickable link if URL available
+                    # Format: Title (url) is sentiment about the industry.
                     if url and url.startswith("http"):
-                        lines.append(f"- [{title}]({url}) [{sentiment}]")
+                        lines.append(f"{title} ({url}) is {sentiment} about the industry.")
                     else:
-                        source_info = f" ({source})" if source else ""
-                        lines.append(f"- {title}{source_info} [{sentiment}]")
+                        lines.append(f"{title} is {sentiment} about the industry.")
+                    lines.append("")  # Add blank line between headlines
         
         logger.info(f"[DEBUG format_news_summary] Final lines count: {len(lines)}")
 
-        if risk_themes_data:
-            if risk_themes_data.get("error"):
-                lines.append(self.format_error_message(risk_themes_data["error"]))
-            else:
-                summary = risk_themes_data.get("summary")
-                if summary:
-                    lines.append(f"Risk themes: {summary}")
-
-                risks = risk_themes_data.get("identified_risks", [])
-                for risk in risks[:3]:
-                    if not isinstance(risk, dict):
-                        continue
-                    risk_name = risk.get("risk", "Unspecified risk")
-                    category = risk.get("category", "Uncategorized")
-                    article_count = risk.get("article_count", 0)
-                    lines.append(
-                        f"- {risk_name} ({category}) — referenced in {article_count} article(s)"
-                    )
-
-                if include_citations:
-                    citation_block = self._format_news_citations(risk_themes_data)
-                    if citation_block:
-                        lines.append(citation_block)
+        # Risk themes section disabled - simplified output format
+        # if risk_themes_data:
+        #     if risk_themes_data.get("error"):
+        #         lines.append(self.format_error_message(risk_themes_data["error"]))
+        #     else:
+        #         summary = risk_themes_data.get("summary")
+        #         if summary:
+        #             lines.append(f"Risk themes: {summary}")
+        #
+        #         risks = risk_themes_data.get("identified_risks", [])
+        #         for risk in risks[:3]:
+        #             if not isinstance(risk, dict):
+        #                 continue
+        #             risk_name = risk.get("risk", "Unspecified risk")
+        #             category = risk.get("category", "Uncategorized")
+        #             article_count = risk.get("article_count", 0)
+        #             lines.append(
+        #                 f"- {risk_name} ({category}) — referenced in {article_count} article(s)"
+        #             )
+        #
+        #         if include_citations:
+        #             citation_block = self._format_news_citations(risk_themes_data)
+        #             if citation_block:
+        #                 lines.append(citation_block)
 
         if not lines:
             return self.templates["empty"]
