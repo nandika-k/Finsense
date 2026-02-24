@@ -417,16 +417,19 @@ class ConversationalAgent:
             current_price = price.get("price", details.get("price", "N/A"))
             perf_1m = details.get("performance_1m", "N/A")
             vol = details.get("volatility", "N/A")
-            return (
-                f"{ticker} {name}: current price {current_price}, 1M performance {perf_1m}, "
-                f"volatility {vol}."
-            )
+            
+            lines = [f"**📈 {ticker}** - {name}", ""]
+            lines.append(f"- **Price:** ${current_price}")
+            lines.append(f"- **1M Performance:** {perf_1m}")
+            lines.append(f"- **Volatility:** {vol}")
+            
+            return "\n".join(lines)
 
         if intent == IntentType.COMPARE:
             comparison = tool_results.get("compare_sectors", {})
             if comparison.get("error"):
                 return self.response_formatter.format_error_message(comparison["error"])
-            return f"Sector comparison completed: {comparison}"
+            return self.response_formatter.format_sector_comparison(comparison)
 
         if intent == IntentType.PORTFOLIO_ANALYSIS:
             var_data = tool_results.get("calculate_var", {})
