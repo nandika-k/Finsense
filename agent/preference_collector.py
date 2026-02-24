@@ -160,22 +160,7 @@ class PreferenceCollector:
 
     def _parse_with_llm(self, user_input: str) -> Optional[PreferenceParseResult]:
         """LLM parser compatible with existing chatbot parsing behavior."""
-        if self.llm_provider != "groq":
-            return None
-
-        api_key = os.getenv("GROQ_API_KEY")
-        if not api_key:
-            return None
-
         try:
-            from groq import Groq
-        except ImportError:
-            return None
-
-        try:
-            if self._groq_client is None:
-                self._groq_client = Groq(api_key=api_key)
-
             prompt = f"""Extract investment preferences from this user response.
 
 AVAILABLE GOALS: {', '.join(INVESTMENT_GOALS)}
@@ -193,14 +178,14 @@ Return ONLY JSON:
 }}
 """
 
-            response = self._groq_client.chat.completions.create(
+            from agent.llm_utils import call_llm
+            content = call_llm(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=250,
             )
 
-            content = (response.choices[0].message.content or "").strip()
             if content.startswith("```"):
                 lines = content.split("\n")
                 content = "\n".join(lines[1:-1]).strip()

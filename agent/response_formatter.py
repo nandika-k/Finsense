@@ -245,22 +245,7 @@ class ResponseFormatter:
         payload: Dict[str, Any],
     ) -> Optional[str]:
         """Optional LLM polish for complex responses; returns None if unavailable."""
-        if self.llm_provider != "groq":
-            return None
-
-        api_key = os.getenv("GROQ_API_KEY")
-        if not api_key:
-            return None
-
         try:
-            from groq import Groq
-        except ImportError:
-            return None
-
-        try:
-            if self._groq_client is None:
-                self._groq_client = Groq(api_key=api_key)
-
             prompt = (
                 "Rewrite the following structured financial response into concise, clear, "
                 "natural language. Use only the provided facts and do not add new claims.\n\n"
@@ -268,13 +253,14 @@ class ResponseFormatter:
                 f"Payload:\n{json.dumps(payload, indent=2)}"
             )
 
-            response = self._groq_client.chat.completions.create(
+            from agent.llm_utils import call_llm
+            result = call_llm(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=220,
             )
-            return (response.choices[0].message.content or "").strip() or None
+            return result
         except Exception:
             return None
 
