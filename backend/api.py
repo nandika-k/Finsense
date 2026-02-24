@@ -982,6 +982,12 @@ async def root():
     return {"status": "healthy", "service": "Finsense API"}
 
 
+@app.get("/health")
+async def health():
+    """Health check endpoint for keepalive pings"""
+    return {"status": "healthy"}
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatMessage, user: Dict[str, Any] = Depends(get_current_user)):
     """
