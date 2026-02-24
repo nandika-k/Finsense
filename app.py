@@ -1,6 +1,7 @@
 import os
 from flask import Flask, redirect, render_template, request, url_for, g
 from auth import auth0
+from auth0_server_python.auth_types import LogoutOptions
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -54,7 +55,9 @@ async def profile():
 @app.route('/logout')
 async def logout():
     """Logout and redirect to Auth0 logout"""
-    logout_url = await auth0.logout(g.store_options)
+    return_to = url_for('index', _external=True)
+    options = LogoutOptions(return_to=return_to)
+    logout_url = await auth0.logout(options, g.store_options)
     return redirect(logout_url)
 
 if __name__ == '__main__':
