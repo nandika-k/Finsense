@@ -83,7 +83,7 @@ INTENT_TO_TOOLS_MAP: Dict[str, List[str]] = {
 }
 
 
-PREFERENCE_REQUIRED_TOOLS = {"get_stock_recommendations", "conduct_research"}
+PREFERENCE_REQUIRED_TOOLS = {"conduct_research"}  # Stock recommendations use defaults if no preferences
 
 
 class ToolRouter:
@@ -177,9 +177,31 @@ class ToolRouter:
             return {"ticker": primary_ticker}
 
         if tool_name == "get_stock_recommendations":
+            # Use extracted sector/goal from query, fallback to preferences, then general defaults
+            sector = primary_sector or pref_sector
+            goal = primary_goal or pref_goal
+            
+            # If still no sector, default based on goal or use broad market
+            if not sector:
+                if goal == "esg":
+                    sector = "technology"  # Tech has most ESG-certified stocks
+                elif goal == "income":
+                    sector = "utilities"  # Utilities for dividends
+                elif goal == "defensive":
+                    sector = "consumer-staples"
+                else:
+                    sector = "technology"  # General default
+            
+            # If no goal, default based on sector or use growth
+            if not goal:
+                if sector in {"utilities", "consumer-staples", "real-estate"}:
+                    goal = "income"  # These sectors suit income investing
+                else:
+                    goal = "growth"  # Default to growth
+            
             return {
-                "sector": primary_sector or pref_sector,
-                "goal": primary_goal or pref_goal,
+                "sector": sector,
+                "goal": goal,
             }
 
         if tool_name in {"fetch_headlines", "extract_risk_themes"}:

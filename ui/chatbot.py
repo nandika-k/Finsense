@@ -405,22 +405,22 @@ User input: "{user_input}"
 Instructions:
 - Understand synonyms, abbreviations, and related industry terms
 - If user says "all" or "everything", return ALL sectors
-- If user mentions specific companies, map them to their sectors (e.g., Apple → technology)
-- Be flexible with phrasing (e.g., "tech stocks" → technology)
-- Handle multiple sectors (e.g., "tech and healthcare" → ["technology", "healthcare"])
+- If user mentions specific companies, map them to their sectors (e.g., Apple -> technology)
+- Be flexible with phrasing (e.g., "tech stocks" -> technology)
+- Handle multiple sectors (e.g., "tech and healthcare" -> ["technology", "healthcare"])
 - Only return sector names from the valid list above
 
 Return ONLY a JSON array of sector names (use the exact names from the valid list).
 
 Examples:
-"tech and pharma" → ["technology", "healthcare"]
-"banks and insurance" → ["financial-services"]
-"renewable energy and EVs" → ["energy", "consumer-discretionary"]
-"software companies" → ["technology"]
-"retail and e-commerce" → ["consumer"]
-"all sectors" → [all 12 sectors listed]
-"defensive stocks" → ["utilities", "consumer-staples", "healthcare"]
-"growth sectors" → ["technology", "healthcare", "communication-services"]
+"tech and pharma" -> ["technology", "healthcare"]
+"banks and insurance" -> ["financial-services"]
+"renewable energy and EVs" -> ["energy", "consumer-discretionary"]
+"software companies" -> ["technology"]
+"retail and e-commerce" -> ["consumer"]
+"all sectors" -> [all 12 sectors listed]
+"defensive stocks" -> ["utilities", "consumer-staples", "healthcare"]
+"growth sectors" -> ["technology", "healthcare", "communication-services"]
 
 JSON array:"""
 
@@ -658,19 +658,19 @@ User said: "{user_input}"
 Answer with ONLY "true" or "false".
 
 Examples:
-"whatever you think is best" → true
-"you decide" → true
-"up to you" → true
-"I trust your judgment" → true
-"you pick" → true
-"surprise me" → true
-"whatever you think" → true
-"your call" → true
-"you choose" → true
-"tech and healthcare" → false
-"1,2,3" → false
-"all sectors" → false
-"technology" → false
+"whatever you think is best" -> true
+"you decide" -> true
+"up to you" -> true
+"I trust your judgment" -> true
+"you pick" -> true
+"surprise me" -> true
+"whatever you think" -> true
+"your call" -> true
+"you choose" -> true
+"tech and healthcare" -> false
+"1,2,3" -> false
+"all sectors" -> false
+"technology" -> false
 
 Answer (true or false):"""
 
@@ -705,11 +705,11 @@ def collect_sector_preferences(suggested_sectors: List[str]) -> List[str]:
         print(f"  {idx:2d}. {sector}{marker}")
 
     if llm_client:
-        print("  ✓ Natural language - describe any way you want:")
+        print("  * Natural language - describe any way you want:")
         print("    'tech and pharma' / 'banks' / 'renewable energy and EVs'")
         print("    'defensive stocks' / 'growth sectors' / 'all but energy'")
         if suggested_sectors:
-            print("  ✓ Build on suggestions: 'suggested plus energy and materials'")
+            print("  * Build on suggestions: 'suggested plus energy and materials'")
 
     while True:
         response = input("\nYour choice: ").strip()
@@ -788,10 +788,10 @@ def collect_sector_preferences(suggested_sectors: List[str]) -> List[str]:
             combined_sectors = suggested_sectors.copy()
             if additional_sectors:
                 combined_sectors.extend(additional_sectors)
-                print("\n  ✓ Parsed your request:")
-                print(f"    • Suggested sectors: {', '.join(suggested_sectors)}")
-                print(f"    • Plus additional: {', '.join(additional_sectors)}")
-                print(f"    • Total: {len(combined_sectors)} sectors")
+                print("\n  * Parsed your request:")
+                print(f"    - Suggested sectors: {', '.join(suggested_sectors)}")
+                print(f"    - Plus additional: {', '.join(additional_sectors)}")
+                print(f"    - Total: {len(combined_sectors)} sectors")
 
                 confirm = input("\n  Is this correct? (yes/no): ").strip().lower()
                 if confirm in ["yes", "y", ""]:
@@ -809,9 +809,9 @@ def collect_sector_preferences(suggested_sectors: List[str]) -> List[str]:
             parsed_sectors = parse_sectors_with_llm(llm_client, response)
 
             if parsed_sectors:
-                print("\n  ✓ Understood your request:")
-                print(f"    • Sectors: {', '.join(parsed_sectors)}")
-                print(f"    • Total: {len(parsed_sectors)} sectors")
+                print("\n  * Understood your request:")
+                print(f"    - Sectors: {', '.join(parsed_sectors)}")
+                print(f"    - Total: {len(parsed_sectors)} sectors")
 
                 confirm = input("\n  Is this correct? (yes/no): ").strip().lower()
                 if confirm in ["yes", "y", ""]:
@@ -839,8 +839,8 @@ def collect_sector_preferences(suggested_sectors: List[str]) -> List[str]:
                     print("  [!] Please select at least one sector")
                     continue
 
-                print(f"\n  ✓ Selected {len(selected_sectors)} sectors:")
-                print(f"    • {', '.join(selected_sectors)}")
+                print(f"\n  * Selected {len(selected_sectors)} sectors:")
+                print(f"    - {', '.join(selected_sectors)}")
 
                 confirm = input("\n  Proceed with these? (yes/no): ").strip().lower()
                 if confirm in ["yes", "y", ""]:
@@ -1072,18 +1072,18 @@ def run_chatbot() -> Optional[Dict]:
                 print("EXAMPLE INPUTS")
                 print("=" * 80)
                 print("\nHere are some example inputs you can try:\n")
-                print("  • 'I want growth in technology with medium risk'")
-                print("  • 'ESG investing in healthcare and energy sectors'")
-                print("  • 'Low risk defensive strategy'")
+                print("  - 'I want growth in technology with medium risk'")
+                print("  - 'ESG investing in healthcare and energy sectors'")
+                print("  - 'Low risk defensive strategy'")
                 print(
-                    "  • 'Income focused on utilities and consumer staples, low risk'"
+                    "  - 'Income focused on utilities and consumer staples, low risk'"
                 )
                 print(
-                    "  • 'Technology and financial services with high risk tolerance'"
+                    "  - 'Technology and financial services with high risk tolerance'"
                 )
                 print("\nYou can also ask for:")
-                print("  • 'ideas' or 'help' - see available goal options")
-                print("  • 'what sectors' - see all available sectors")
+                print("  - 'ideas' or 'help' - see available goal options")
+                print("  - 'what sectors' - see all available sectors")
                 print("=" * 80)
                 continue  # Restart the loop to ask the question again
 
@@ -1118,17 +1118,17 @@ User input: "{initial_input}"
 Answer with ONLY "true" or "false".
 
 Examples:
-"what sectors are available" → true
-"show me sectors" → true
-"which sectors can I choose" → true
-"list all sectors" → true
-"what are my sector options" → true
-"sector ideas" → true
-"suggested sectors" → true
-"what sectors do you suggest" → true
-"I want tech stocks" → false
-"growth investing" → false
-"help" → false
+"what sectors are available" -> true
+"show me sectors" -> true
+"which sectors can I choose" -> true
+"list all sectors" -> true
+"what are my sector options" -> true
+"sector ideas" -> true
+"suggested sectors" -> true
+"what sectors do you suggest" -> true
+"I want tech stocks" -> false
+"growth investing" -> false
+"help" -> false
 
 Answer (true or false):"""
 
@@ -1151,14 +1151,14 @@ User input: "{initial_input}"
 Answer with ONLY "true" or "false".
 
 Examples:
-"what else do you need" → true
-"what else do you need to know" → true
-"what information do you need" → true
-"what's missing" → true
-"what do you need from me" → true
-"anything else" → true
-"esg low risk" → false
-"technology" → false
+"what else do you need" -> true
+"what else do you need to know" -> true
+"what information do you need" -> true
+"what's missing" -> true
+"what do you need from me" -> true
+"anything else" -> true
+"esg low risk" -> false
+"technology" -> false
 
 Answer (true or false):"""
                         resp2 = llm_client.chat.completions.create(
@@ -1220,9 +1220,9 @@ Answer (true or false):"""
                     missing.append("your risk tolerance (low/medium/high)")
 
                 if missing:
-                    print(f"\n  → I still need to know: {' and '.join(missing)}")
+                    print(f"\n  -> I still need to know: {' and '.join(missing)}")
                 else:
-                    print("\n  → I have all the information I need! Let me confirm...")
+                    print("\n  -> I have all the information I need! Let me confirm...")
                 continue
 
             if asking_for_sector_help:
@@ -1238,7 +1238,7 @@ Answer (true or false):"""
                     suggested = suggest_sectors_from_goals(goals)
                     if suggested:
                         print(
-                            f"\n  💡 Based on your goals, I suggest: {', '.join(suggested)}"
+                            f"\n  * Based on your goals, I suggest: {', '.join(suggested)}"
                         )
 
                 print("\n" + "=" * 80)
@@ -1272,9 +1272,9 @@ Answer (true or false):"""
                 understood.append(f"Risk: {parsed.get('risk_tolerance').upper()}")
 
             if understood:
-                print("\n  ✓ Understood:")
+                print("\n  * Understood:")
                 for item in understood:
-                    print(f"    • {item}")
+                    print(f"    - {item}")
                 shown_understood = True  # Mark that we've shown info
 
                 # If incomplete, prompt for what's missing instead of looping
@@ -1287,7 +1287,7 @@ Answer (true or false):"""
                         missing.append("risk tolerance")
 
                     if missing:
-                        print(f"\n  → What about {' and '.join(missing)}?")
+                        print(f"\n  -> What about {' and '.join(missing)}?")
                     continue  # Ask again for remaining info
             else:
                 # Nothing understood from this input - check if it's an affirmative
@@ -1313,7 +1313,7 @@ Answer (true or false):"""
                         if risk_tolerance is None:
                             missing.append("risk tolerance")
                         print(
-                            f"\n  → I still need to know your {' and '.join(missing)}."
+                            f"\n  -> I still need to know your {' and '.join(missing)}."
                         )
                         continue
                 # Otherwise, couldn't parse - will loop back to ask again

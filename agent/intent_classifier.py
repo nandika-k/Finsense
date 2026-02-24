@@ -163,10 +163,9 @@ class IntentClassification:
 
 # Intents that require user preferences
 PREFERENCE_REQUIRED_INTENTS = {
-    IntentType.STOCK_RECOMMENDATIONS,
     IntentType.SECTOR_RECOMMENDATIONS,
     IntentType.FULL_RESEARCH,
-}
+}  # STOCK_RECOMMENDATIONS now uses defaults for quick picks
 
 
 class IntentClassifier:
@@ -490,13 +489,41 @@ IMPORTANT:
             classification.clarification_needed = False
             return classification
 
-        # Market overview detection
-        market_keywords = ["market", "indices", "dow", "s&p", "nasdaq", "overall"]
-        if any(keyword in query_lower for keyword in market_keywords):
-            if "how" in query_lower or "what" in query_lower or "doing" in query_lower:
-                classification.intent_type = IntentType.MARKET_OVERVIEW
-                classification.confidence = "medium"
-                return classification
+        # Market overview detection (support direct command phrasing)
+        market_patterns = [
+            r"\bmarket overview\b",
+            r"\bmarket status\b",
+            r"\bmarket snapshot\b",
+            r"\b(indices|index)\b",
+            r"\b(dow|nasdaq|s&p|spx|dji|ixic|russell)\b",
+            r"\boverall market\b",
+        ]
+        if any(re.search(pattern, query_lower) for pattern in market_patterns):
+            classification.intent_type = IntentType.MARKET_OVERVIEW
+            classification.confidence = "high"
+            classification.clarification_needed = False
+            return classification
+
+        # News/headlines fallback detection
+        news_patterns = [r"\bnews\b", r"\bheadlines?\b", r"\bbreaking\b"]
+        if any(re.search(pattern, query_lower) for pattern in news_patterns):
+            classification.intent_type = IntentType.NEWS_QUERY
+            classification.confidence = "medium"
+            classification.clarification_needed = False
+            return classification
+
+        # Stock recommendation fallback detection
+        stock_reco_patterns = [
+            r"\bstock(s)?\b",
+            r"\bstock ideas\b",
+            r"\bstock picks\b",
+            r"\brecommend.*stock",
+        ]
+        if any(re.search(pattern, query_lower) for pattern in stock_reco_patterns):
+            classification.intent_type = IntentType.STOCK_RECOMMENDATIONS
+            classification.confidence = "medium"
+            classification.clarification_needed = False
+            return classification
 
         # If still unclear, ask for clarification
         if (

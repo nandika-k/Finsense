@@ -178,6 +178,12 @@ class ResponseFormatter:
         include_citations: bool = True,
     ) -> str:
         """Format headlines, risk themes, and optional article citations."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"[DEBUG format_news_summary] headlines_data keys: {headlines_data.keys() if headlines_data else 'None'}")
+        logger.info(f"[DEBUG format_news_summary] risk_themes_data keys: {risk_themes_data.keys() if risk_themes_data else 'None'}")
+        
         if not headlines_data and not risk_themes_data:
             return self.templates["empty"]
 
@@ -191,16 +197,32 @@ class ResponseFormatter:
                 timeframe = headlines_data.get("timeframe", "recent period")
                 count = headlines_data.get("headline_count", 0)
                 lines.append(
-                    f"Recent news for {sector} ({timeframe}): {count} headlines analyzed."
+                    f"**Recent News for {sector.upper()}** ({timeframe}): {count} headlines analyzed."
                 )
+                lines.append("")
 
                 headlines = headlines_data.get("headlines", [])
-                for item in headlines[:3]:
+                logger.info(f"[DEBUG format_news_summary] Number of headlines: {len(headlines)}")
+                if headlines:
+                    logger.info(f"[DEBUG format_news_summary] First headline keys: {headlines[0].keys() if headlines[0] else 'empty'}")
+                    logger.info(f"[DEBUG format_news_summary] First headline URL: {headlines[0].get('url', 'NO URL')}")
+                
+                for item in headlines[:5]:  # Show more headlines
                     if not isinstance(item, dict):
                         continue
                     title = item.get("title", "Untitled")
+                    url = item.get("url", "")
                     sentiment = item.get("sentiment", "neutral")
-                    lines.append(f"- {title} [{sentiment}]")
+                    source = item.get("source", "")
+                    
+                    # Format with clickable link if URL available
+                    if url and url.startswith("http"):
+                        lines.append(f"- [{title}]({url}) [{sentiment}]")
+                    else:
+                        source_info = f" ({source})" if source else ""
+                        lines.append(f"- {title}{source_info} [{sentiment}]")
+        
+        logger.info(f"[DEBUG format_news_summary] Final lines count: {len(lines)}")
 
         if risk_themes_data:
             if risk_themes_data.get("error"):
@@ -265,7 +287,7 @@ class ResponseFormatter:
             return None
 
     def _format_news_citations(self, risk_themes_data: Dict[str, Any]) -> str:
-        """Build a compact citation block from risk themes article sources."""
+        """Build a compact citation block from risk themes article sources with real URLs."""
         risks = risk_themes_data.get("identified_risks", [])
         citations: List[str] = []
 
@@ -278,12 +300,17 @@ class ResponseFormatter:
                 if not isinstance(article, dict):
                     continue
                 title = article.get("title", "Untitled")
-                source = (
-                    article.get("source") or article.get("url") or "Source unavailable"
-                )
-                citations.append(f"- {risk_name}: {title} ({source})")
+                url = article.get("url", "")
+                source = article.get("source", "")
+                
+                # Format with clickable link if URL available
+                if url and url.startswith("http"):
+                    citations.append(f"- {risk_name}: [{title}]({url})")
+                else:
+                    source_info = f" ({source})" if source else ""
+                    citations.append(f"- {risk_name}: {title}{source_info}")
 
         if not citations:
             return ""
 
-        return "Citations:\n" + "\n".join(citations)
+        return "**Sources:**\n" + "\n".join(citations)
