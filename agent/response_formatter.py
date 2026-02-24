@@ -214,6 +214,35 @@ class ResponseFormatter:
 
         return "\n".join(lines)
 
+    def format_multi_sector_recommendations(
+        self, stocks: List[Dict[str, Any]], goal: str
+    ) -> str:
+        """Format stock recommendations from multiple sectors."""
+        if not stocks:
+            return self.templates["empty"]
+
+        lines = [f"**📈 Top Stocks Across Sectors** ({goal.upper()} focus)", ""]
+        
+        for idx, stock in enumerate(stocks[:10], start=1):
+            ticker = stock.get("ticker", "N/A")
+            name = stock.get("name", "")
+            price = stock.get("price", "N/A")
+            perf = stock.get("performance_1m", "N/A")
+            volatility = stock.get("volatility", "N/A")
+            sector = stock.get("sector", "").upper()
+            dividend = stock.get("dividend_yield", "N/A")
+
+            lines.append(f"**{idx}. {ticker}** - {name}")
+            lines.append(f"   - Sector: {sector}")
+            lines.append(f"   - Price: ${price}")
+            lines.append(f"   - 1M Performance: {perf}")
+            lines.append(f"   - Volatility: {volatility}")
+            if dividend and dividend != "N/A" and dividend != 0:
+                lines.append(f"   - Dividend Yield: {dividend}")
+            lines.append("")
+
+        return "\n".join(lines)
+
     def format_risk_analysis(
         self,
         volatility_data: Optional[Dict[str, Any]] = None,

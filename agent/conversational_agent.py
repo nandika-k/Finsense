@@ -329,8 +329,40 @@ class ConversationalAgent:
             self.analytics.record_tool_calls(self._active_query_index, 0)
             return "I understood your request, but there is no tool action mapped for it yet."
 
+        # Handle multi-sector stock recommendations when sector="all"
+        for call in tool_calls:
+            if call.tool_name == "get_stock_recommendations" and call.arguments.get("sector") == "all":
+                return await self._execute_multi_sector_recommendations(call.arguments.get("goal", "growth"))
+
         tool_results = await self._execute_tool_calls(tool_calls)
         return self._format_tool_results(classification, tool_results)
+
+    async def _execute_multi_sector_recommendations(self, goal: str) -> str:
+        """Fetch stock recommendations from multiple sectors and combine results."""
+        sectors = ["technology", "healthcare", "financials", "energy", "consumer-discretionary"]
+        all_stocks = []
+        
+        for sector in sectors:
+            try:
+                method = getattr(self.coordinator, "get_stock_recommendations", None)
+                if method:
+                    result = await method(sector=sector, goal=goal)
+                    if isinstance(result, dict) and "stocks" in result:
+                        for stock in result["stocks"][:3]:  # Top 3 from each sector
+                            stock["sector"] = sector
+                            all_stocks.append(stock)
+            except Exception:
+                continue
+        
+        # Sort combined results by performance
+        if goal == "growth":
+            all_stocks.sort(key=lambda x: float(x.get("performance_1m", "0").rstrip("%")), reverse=True)
+        elif goal == "income":
+            all_stocks.sort(key=lambda x: x.get("dividend_yield", 0), reverse=True)
+        else:
+            all_stocks.sort(key=lambda x: float(x.get("performance_1m", "0").rstrip("%")), reverse=True)
+        
+        return self.response_formatter.format_multi_sector_recommendations(all_stocks[:10], goal)
 
     async def _execute_tool_calls(self, tool_calls: List[ToolCall]) -> Dict[str, Any]:
         """Execute routed tool calls through coordinator methods."""

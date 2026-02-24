@@ -177,20 +177,13 @@ class ToolRouter:
             return {"ticker": primary_ticker}
 
         if tool_name == "get_stock_recommendations":
-            # Use extracted sector/goal from query, fallback to preferences, then general defaults
+            # Use extracted sector/goal from query, fallback to preferences
             sector = primary_sector or pref_sector
             goal = primary_goal or pref_goal
             
-            # If still no sector, default based on goal or use broad market
+            # If no sector specified, use "all" to trigger multi-sector fetch
             if not sector:
-                if goal == "esg":
-                    sector = "technology"  # Tech has most ESG-certified stocks
-                elif goal == "income":
-                    sector = "utilities"  # Utilities for dividends
-                elif goal == "defensive":
-                    sector = "consumer-staples"
-                else:
-                    sector = "technology"  # General default
+                sector = "all"
             
             # If no goal, default based on sector or use growth
             if not goal:
