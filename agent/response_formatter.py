@@ -7,8 +7,11 @@ Formats MCP tool outputs into natural, conversational responses for chat mode.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class ResponseFormatter:
@@ -108,12 +111,15 @@ class ResponseFormatter:
 
         lines = [f"**💼 Sector Comparison: {sector1} vs {sector2}** ({timeframe})", ""]
 
+        s1_key = sector1.lower()
+        s2_key = sector2.lower()
+
         # Volatility comparison
         vol_comp = comparison_data.get("volatility_comparison", {})
         if vol_comp:
             lines.append("**Volatility:**")
-            lines.append(f"- {sector1}: {vol_comp.get('tech', vol_comp.get(sector1.lower(), 'N/A'))}")
-            lines.append(f"- {sector2}: {vol_comp.get('healthcare', vol_comp.get(sector2.lower(), 'N/A'))}")
+            lines.append(f"- {sector1}: {vol_comp.get(s1_key, 'N/A')}")
+            lines.append(f"- {sector2}: {vol_comp.get(s2_key, 'N/A')}")
             lower = vol_comp.get("lower_volatility", "")
             if lower:
                 lines.append(f"- ✅ Lower volatility: **{lower.upper()}**")
@@ -123,8 +129,8 @@ class ResponseFormatter:
         dd_comp = comparison_data.get("max_drawdown", {})
         if dd_comp:
             lines.append("**Max Drawdown:**")
-            lines.append(f"- {sector1}: {dd_comp.get('tech', dd_comp.get(sector1.lower(), 'N/A'))}")
-            lines.append(f"- {sector2}: {dd_comp.get('healthcare', dd_comp.get(sector2.lower(), 'N/A'))}")
+            lines.append(f"- {sector1}: {dd_comp.get(s1_key, 'N/A')}")
+            lines.append(f"- {sector2}: {dd_comp.get(s2_key, 'N/A')}")
             lower = dd_comp.get("lower_drawdown", "")
             if lower:
                 lines.append(f"- ✅ Smaller drawdown: **{lower.upper()}**")
@@ -134,8 +140,8 @@ class ResponseFormatter:
         ret_comp = comparison_data.get("total_return", {})
         if ret_comp:
             lines.append("**Total Return:**")
-            lines.append(f"- {sector1}: {ret_comp.get('tech', ret_comp.get(sector1.lower(), 'N/A'))}")
-            lines.append(f"- {sector2}: {ret_comp.get('healthcare', ret_comp.get(sector2.lower(), 'N/A'))}")
+            lines.append(f"- {sector1}: {ret_comp.get(s1_key, 'N/A')}")
+            lines.append(f"- {sector2}: {ret_comp.get(s2_key, 'N/A')}")
             higher = ret_comp.get("higher_return", "")
             if higher:
                 lines.append(f"- ✅ Higher return: **{higher.upper()}**")
@@ -145,8 +151,8 @@ class ResponseFormatter:
         sharpe_comp = comparison_data.get("sharpe_ratio", {})
         if sharpe_comp:
             lines.append("**Sharpe Ratio (Risk-Adjusted Return):**")
-            lines.append(f"- {sector1}: {sharpe_comp.get('tech', sharpe_comp.get(sector1.lower(), 'N/A'))}")
-            lines.append(f"- {sector2}: {sharpe_comp.get('healthcare', sharpe_comp.get(sector2.lower(), 'N/A'))}")
+            lines.append(f"- {sector1}: {sharpe_comp.get(s1_key, 'N/A')}")
+            lines.append(f"- {sector2}: {sharpe_comp.get(s2_key, 'N/A')}")
             higher = sharpe_comp.get("higher_sharpe", "")
             if higher:
                 lines.append(f"- ✅ Better risk-adjusted: **{higher.upper()}**")
@@ -156,8 +162,8 @@ class ResponseFormatter:
         beta_comp = comparison_data.get("beta", {})
         if beta_comp:
             lines.append("**Beta (Market Sensitivity):**")
-            lines.append(f"- {sector1}: {beta_comp.get('tech', beta_comp.get(sector1.lower(), 'N/A'))}")
-            lines.append(f"- {sector2}: {beta_comp.get('healthcare', beta_comp.get(sector2.lower(), 'N/A'))}")
+            lines.append(f"- {sector1}: {beta_comp.get(s1_key, 'N/A')}")
+            lines.append(f"- {sector2}: {beta_comp.get(s2_key, 'N/A')}")
             lower = beta_comp.get("lower_beta", "")
             if lower:
                 lines.append(f"- ✅ Lower market sensitivity: **{lower.upper()}**")
@@ -322,12 +328,6 @@ class ResponseFormatter:
         include_citations: bool = True,
     ) -> str:
         """Format headlines, risk themes, and optional article citations."""
-        import logging
-        logger = logging.getLogger(__name__)
-        
-        logger.info(f"[DEBUG format_news_summary] headlines_data keys: {headlines_data.keys() if headlines_data else 'None'}")
-        logger.info(f"[DEBUG format_news_summary] risk_themes_data keys: {risk_themes_data.keys() if risk_themes_data else 'None'}")
-        
         if not headlines_data and not risk_themes_data:
             return self.templates["empty"]
 
@@ -338,12 +338,7 @@ class ResponseFormatter:
                 lines.append(self.format_error_message(headlines_data["error"]))
             else:
                 headlines = headlines_data.get("headlines", [])
-                logger.info(f"[DEBUG format_news_summary] Number of headlines: {len(headlines)}")
-                if headlines:
-                    logger.info(f"[DEBUG format_news_summary] First headline keys: {headlines[0].keys() if headlines[0] else 'empty'}")
-                    logger.info(f"[DEBUG format_news_summary] First headline URL: {headlines[0].get('url', 'NO URL')}")
-                
-                for item in headlines[:5]:  # Show more headlines
+                for item in headlines[:5]:
                     if not isinstance(item, dict):
                         continue
                     title = item.get("title", "Untitled")
@@ -355,9 +350,7 @@ class ResponseFormatter:
                         lines.append(f"{title} ({url}) - {sentiment}")
                     else:
                         lines.append(f"{title} - {sentiment}")
-                    lines.append("")  # Add blank line between headlines
-        
-        logger.info(f"[DEBUG format_news_summary] Final lines count: {len(lines)}")
+                    lines.append("")  # blank line between headlines
 
         # Risk themes section disabled - simplified output format
         # if risk_themes_data:
