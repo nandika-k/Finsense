@@ -3,9 +3,11 @@ FastAPI backend for Finsense web chatbot.
 Provides REST API endpoints for conversation and research.
 """
 
+import asyncio
+import os
 import uuid
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,8 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from agent.agent import FinsenseCoordinator
 from agent.conversational_agent import ConversationalAgent
 from ui.chatbot import (
-    INVESTMENT_GOALS, 
-    AVAILABLE_SECTORS, 
+    INVESTMENT_GOALS,
+    AVAILABLE_SECTORS,
     parse_initial_query,
     parse_sectors_with_llm,
     is_delegating_decision,
@@ -40,18 +42,72 @@ load_dotenv()
 # Initialize FastAPI app
 app = FastAPI(title="Finsense API", version="1.0.0")
 
-# Configure CORS for frontend
+# --- CORS ---
+# Fix 3: Lock CORS to the deployed frontend; falls back to permissive only when
+# FRONTEND_URL is not configured (local dev).
+_frontend_url = os.getenv("FRONTEND_URL", "")
+_allowed_origins = [_frontend_url] if _frontend_url else ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify your frontend domain
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Session storage (in production, use Redis or database)
+# --- Session storage (in-memory; swap for Redis in a scaled deployment) ---
 sessions: Dict[str, Dict[str, Any]] = {}
 session_chat_agents: Dict[str, ConversationalAgent] = {}
+
+# Fix 1: A single shared FinsenseCoordinator for all sessions.
+# Initialised once at startup; injected into every ConversationalAgent so that
+# the three MCP subprocess servers are created exactly once instead of once per user.
+_shared_coordinator: Optional[FinsenseCoordinator] = None
+
+# Fix 2: How long an idle session is kept before automatic eviction.
+_SESSION_TTL = timedelta(minutes=30)
+_cleanup_task: Optional[asyncio.Task] = None
+
+
+@app.on_event("startup")
+async def _startup():
+    """Pre-warm the shared coordinator and launch the background cleanup task."""
+    global _shared_coordinator, _cleanup_task
+
+    _shared_coordinator = FinsenseCoordinator()
+    await _shared_coordinator.initialize()
+
+    _cleanup_task = asyncio.create_task(_session_cleanup_loop())
+
+
+@app.on_event("shutdown")
+async def _shutdown():
+    """Gracefully close MCP subprocess connections on server exit."""
+    global _cleanup_task
+    if _cleanup_task:
+        _cleanup_task.cancel()
+    if _shared_coordinator and hasattr(_shared_coordinator, "close"):
+        await _shared_coordinator.close()
+
+
+async def _session_cleanup_loop():
+    """Background task: evict sessions that have been idle longer than SESSION_TTL."""
+    while True:
+        await asyncio.sleep(300)  # check every 5 minutes
+        _evict_stale_sessions()
+
+
+def _evict_stale_sessions():
+    """Remove sessions (and their agent objects) that have exceeded TTL."""
+    cutoff = datetime.now() - _SESSION_TTL
+    stale = [
+        sid for sid, data in sessions.items()
+        if datetime.fromisoformat(data.get("last_active", data["created_at"])) < cutoff
+    ]
+    for sid in stale:
+        sessions.pop(sid, None)
+        session_chat_agents.pop(sid, None)
 
 
 # Request/Response Models
@@ -82,8 +138,9 @@ class ResearchResponse(BaseModel):
 
 # Helper Functions
 def create_session() -> str:
-    """Create a new session with initial state"""
+    """Create a new session with initial state."""
     session_id = str(uuid.uuid4())
+    now = datetime.now().isoformat()
     sessions[session_id] = {
         "state": "initial",
         "analysis_mode": "full_research",
@@ -94,16 +151,30 @@ def create_session() -> str:
         },
         "conversation_history": [],
         "research_data": None,
-        "created_at": datetime.now().isoformat()
+        "created_at": now,
+        "last_active": now,
     }
     return session_id
 
 
+def _touch_session(session_id: str):
+    """Update the last_active timestamp so TTL eviction is deferred."""
+    if session_id in sessions:
+        sessions[session_id]["last_active"] = datetime.now().isoformat()
+
+
 def get_or_create_conversational_agent(session_id: str) -> ConversationalAgent:
-    """Get or create a session-scoped conversational agent."""
+    """Return the session-scoped ConversationalAgent, creating it if needed.
+
+    Fix 1: The shared coordinator is injected here, so no new MCP subprocesses
+    are spawned per user.  The agent is also flagged as already-initialized so
+    the first user message is not delayed by subprocess startup.
+    """
     agent = session_chat_agents.get(session_id)
     if agent is None:
-        agent = ConversationalAgent()
+        agent = ConversationalAgent(coordinator=_shared_coordinator)
+        # Coordinator is already warm; skip the lazy-init delay.
+        agent._initialized = True
         session_chat_agents[session_id] = agent
     return agent
 
@@ -1006,6 +1077,9 @@ async def chat(request: ChatMessage, user: Dict[str, Any] = Depends(get_current_
         "timestamp": datetime.now().isoformat()
     })
     
+    # Refresh TTL so active sessions are not evicted mid-conversation.
+    _touch_session(session_id)
+
     # Process message based on state
     response_data = await get_llm_response(request.message, "", session, session_id)
     

@@ -362,10 +362,18 @@ Return ONLY the intent word, nothing else."""
         return "unclear"
 
 
+# Fix 5: Cache the LLM-availability check at module level so the import and
+# client-initialisation only happen once per process instead of once per request.
+_llm_client_available: Optional[bool] = None
+
+
 def get_llm_client() -> bool:
-    """Return True if any LLM client is available"""
-    from agent.llm_utils import get_groq_client, get_fallback_client
-    return get_groq_client() is not None or get_fallback_client() is not None
+    """Return True if any LLM client is available (result is cached after first call)."""
+    global _llm_client_available
+    if _llm_client_available is None:
+        from agent.llm_utils import get_groq_client, get_fallback_client
+        _llm_client_available = get_groq_client() is not None or get_fallback_client() is not None
+    return _llm_client_available
 
 
 def parse_sectors_with_llm(client: Any, user_input: str) -> Optional[List[str]]:

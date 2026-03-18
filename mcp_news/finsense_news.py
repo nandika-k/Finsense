@@ -34,6 +34,28 @@ def log(msg):
 
 RELEVANCE_SCORE = 7
 
+# Fix 6: In-process TTL cache for news results.
+# During a demo multiple users often ask about the same sector in quick succession.
+# Caching for 10 minutes avoids redundant HTTP scraping and dramatically speeds up
+# second-and-later requests for the same (sector, timeframe) pair.
+_NEWS_CACHE: dict = {}          # key → {"result": ..., "expires_at": datetime}
+_NEWS_CACHE_TTL = timedelta(minutes=10)
+
+
+def _cache_get(key: str):
+    entry = _NEWS_CACHE.get(key)
+    if entry and datetime.utcnow() < entry["expires_at"]:
+        return entry["result"]
+    _NEWS_CACHE.pop(key, None)
+    return None
+
+
+def _cache_set(key: str, result):
+    _NEWS_CACHE[key] = {
+        "result": result,
+        "expires_at": datetime.utcnow() + _NEWS_CACHE_TTL,
+    }
+
 # --- MCP Server Initialization ---
 app = Server("finsense-news")
 
@@ -1101,11 +1123,18 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     if name == "fetch_headlines":
         sector = arguments.get("sector", "")
         timeframe = arguments.get("timeframe", "")
-        
+
+        # Fix 6: serve from cache when available.
+        _cache_key = f"headlines::{sector}::{timeframe}"
+        cached = _cache_get(_cache_key)
+        if cached is not None:
+            log(f"cache hit: {_cache_key}")
+            return [TextContent(type="text", text=json.dumps(cached, indent=2))]
+
         try:
             days = parse_timeframe_to_days(timeframe)
             headlines = fetch_headlines_from_rss(sector, days, max_results=20)
-            
+
             if not headlines:
                 log("WARNING: No headlines found!")
                 return [TextContent(
@@ -1117,12 +1146,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         "message": "No relevant headlines found. This could be due to RSS feed issues or connectivity problems."
                     })
                 )]
-            
+
             # Calculate sentiment distribution
-            sentiment_counts = {"positive": 0, "negative": 0, "mixed": 0,"neutral": 0}
+            sentiment_counts = {"positive": 0, "negative": 0, "mixed": 0, "neutral": 0}
             for h in headlines:
                 sentiment_counts[h.get("sentiment", "neutral")] += 1
-            
+
             result = {
                 "sector": sector,
                 "timeframe": timeframe,
@@ -1131,9 +1160,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 "sentiment_distribution": sentiment_counts,
                 "headlines": headlines
             }
-            
+
+            _cache_set(_cache_key, result)
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
-            
+
         except Exception as e:
             log(f"ERROR in fetch_headlines: {e}")
             import traceback
@@ -1150,13 +1180,20 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     elif name == "extract_risk_themes":
         sector = arguments.get("sector", "")
         timeframe = arguments.get("timeframe", "")
-        
+
+        # Fix 6: serve from cache when available.
+        _cache_key = f"risk_themes::{sector}::{timeframe}"
+        cached = _cache_get(_cache_key)
+        if cached is not None:
+            log(f"cache hit: {_cache_key}")
+            return [TextContent(type="text", text=json.dumps(cached, indent=2))]
+
         try:
             days = parse_timeframe_to_days(timeframe)
             log(f"Fetching articles for {sector} over {timeframe} ({days} days)")
-            
+
             articles = fetch_headlines_from_rss(sector, days, max_results=30)
-            
+
             if not articles:
                 log("WARNING: No articles found for risk extraction!")
                 return [TextContent(
@@ -1169,17 +1206,18 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         "message": "No relevant articles found. Unable to extract risk themes. This could be due to RSS feed issues."
                     })
                 )]
-            
+
             log(f"Fetched {len(articles)} articles, extracting risk themes...")
             result = extract_risk_themes_from_headlines(articles, sector)
-            
+
             result["sector"] = sector
             result["timeframe"] = timeframe
             result["articles_fetched"] = len(articles)
             result["fetch_date"] = datetime.now().isoformat()
-            
+
+            _cache_set(_cache_key, result)
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
-            
+
         except Exception as e:
             log(f"ERROR in extract_risk_themes: {e}")
             import traceback

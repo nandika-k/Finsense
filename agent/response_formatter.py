@@ -350,11 +350,11 @@ class ResponseFormatter:
                     url = item.get("url", "")
                     sentiment = item.get("sentiment", "neutral")
                     
-                    # Format: Title (url) is sentiment about the industry.
+                    # Format: title (url) is sentiment about the industry
                     if url and url.startswith("http"):
-                        lines.append(f"{title} ({url}) is {sentiment} about the industry.")
+                        lines.append(f"{title} ({url}) - {sentiment}")
                     else:
-                        lines.append(f"{title} is {sentiment} about the industry.")
+                        lines.append(f"{title} - {sentiment}")
                     lines.append("")  # Add blank line between headlines
         
         logger.info(f"[DEBUG format_news_summary] Final lines count: {len(lines)}")
