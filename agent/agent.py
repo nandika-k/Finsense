@@ -252,10 +252,7 @@ class FinsenseCoordinator:
         """Get current market indices"""
         result = await self.market_client.call_tool("get_market_indices", {})
         content = result["content"][0]["text"]
-        import json
-
-        indices = json.loads(content)
-        return indices
+        return json.loads(content)
 
     async def get_stock_price(self, ticker: str) -> Dict[str, Any]:
         """Get stock price for a ticker"""
@@ -263,10 +260,7 @@ class FinsenseCoordinator:
             "get_stock_price", {"ticker": ticker}
         )
         content = result["content"][0]["text"]
-        import json
-
-        stock_data = json.loads(content)
-        return stock_data
+        return json.loads(content)
 
     async def get_sector_summary(self, sector: str) -> Dict[str, Any]:
         """Get sector summary"""
@@ -274,10 +268,7 @@ class FinsenseCoordinator:
             "get_sector_summary", {"sector": sector}
         )
         content = result["content"][0]["text"]
-        import json
-
-        summary = json.loads(content)
-        return summary
+        return json.loads(content)
 
     async def get_stock_recommendations(self, sector: str, goal: str) -> Dict[str, Any]:
         """Get stock recommendations for a sector based on investment goal"""
@@ -285,10 +276,7 @@ class FinsenseCoordinator:
             "get_stock_recommendations", {"sector": sector, "goal": goal}
         )
         content = result["content"][0]["text"]
-        import json
-
-        recommendations = json.loads(content)
-        return recommendations
+        return json.loads(content)
 
     async def get_stock_details(self, ticker: str) -> Dict[str, Any]:
         """Get detailed information for a specific stock"""
@@ -296,10 +284,7 @@ class FinsenseCoordinator:
             "get_stock_details", {"ticker": ticker}
         )
         content = result["content"][0]["text"]
-        import json
-
-        details = json.loads(content)
-        return details
+        return json.loads(content)
 
     # risk tools
     async def compute_sector_volatility(
