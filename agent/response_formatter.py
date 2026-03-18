@@ -69,7 +69,7 @@ class ResponseFormatter:
         perf_1y = sector_summary.get("performance_1y", "N/A")
 
         lines = [
-            f"{sector_name} sector overview:",
+            f"**{sector_name.title()} Sector Overview:**",
             f"- Performance: 1M {perf_1m}, 3M {perf_3m}, 1Y {perf_1y}",
         ]
 
@@ -189,7 +189,7 @@ class ResponseFormatter:
 
         if not stocks:
             return (
-                f"I don’t have stock recommendations for {sector} ({goal}) right now."
+                f"I don’t have stock recommendations for {sector.title()} ({goal.title()}) right now."
             )
 
         lines = [f"**📈 Stock Recommendations for {goal.upper()} in {sector.upper()}**", ""]

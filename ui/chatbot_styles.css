@@ -791,3 +791,46 @@ body {
     color: var(--dark-green);
     font-weight: 600;
 }
+
+/* Further Research Resources Card */
+.resources-card {
+    background: var(--very-light-green);
+    border: 1px solid var(--light-green);
+    border-left: 4px solid var(--medium-green);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-top: 4px;
+}
+
+.resources-card p {
+    margin-bottom: 10px;
+    color: var(--dark-green);
+    font-size: 14px;
+}
+
+.resources-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.resources-list li {
+    padding: 5px 0;
+    font-size: 13px;
+    color: var(--gray-800);
+    border-bottom: 1px solid var(--light-green);
+}
+
+.resources-list li:last-child {
+    border-bottom: none;
+}
+
+.resources-list a {
+    color: var(--medium-green);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.resources-list a:hover {
+    text-decoration: underline;
+}

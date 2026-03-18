@@ -123,6 +123,7 @@ class ChatResponse(BaseModel):
     data: Optional[Dict[str, Any]] = None
     needs_confirmation: bool = False
     options: Optional[List[str]] = None
+    show_resources: bool = False
 
 
 class ResearchRequest(BaseModel):
@@ -1080,12 +1081,22 @@ async def chat(request: ChatMessage, user: Dict[str, Any] = Depends(get_current_
         "timestamp": datetime.now().isoformat()
     })
     
+    bot_message = response_data["bot_message"]
+    _cannot_help_phrases = (
+        "i can't provide personal buy/sell advice",
+        "i don't have enough information",
+        "i'm unable to help with that",
+        "outside the scope",
+    )
+    show_resources = any(phrase in bot_message.lower() for phrase in _cannot_help_phrases)
+
     return ChatResponse(
         session_id=session_id,
-        bot_message=response_data["bot_message"],
+        bot_message=bot_message,
         state=response_data["state"],
         data=response_data.get("data"),
-        needs_confirmation=response_data["state"] == "confirming"
+        needs_confirmation=response_data["state"] == "confirming",
+        show_resources=show_resources,
     )
 
 

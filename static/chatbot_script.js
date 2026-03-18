@@ -426,7 +426,12 @@ class ChatbotUI {
             
             // Add bot response
             this.addBotMessage(response.bot_message);
-            
+
+            // If the system cannot help further, show research resources
+            if (response.show_resources) {
+                this.addResourcesCard();
+            }
+
             // If ready to research, trigger research
             if (response.state === 'ready_to_research') {
                 await this.startResearch();
@@ -815,6 +820,61 @@ class ChatbotUI {
             // Wait before showing next section
             await new Promise(resolve => setTimeout(resolve, 300));
         }
+    }
+
+    addResourcesCard() {
+        const resources = [
+            { name: 'Yahoo Finance', url: 'https://finance.yahoo.com', desc: 'Market data & news' },
+            { name: 'Investopedia', url: 'https://www.investopedia.com', desc: 'Financial education' },
+            { name: 'MarketWatch', url: 'https://www.marketwatch.com', desc: 'Market news & analysis' },
+            { name: 'Bloomberg Markets', url: 'https://www.bloomberg.com/markets', desc: 'Global financial news' },
+            { name: 'Morningstar', url: 'https://www.morningstar.com', desc: 'Investment research & ratings' },
+            { name: 'Seeking Alpha', url: 'https://seekingalpha.com', desc: 'Stock analysis & opinions' },
+        ];
+
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message bot-message';
+
+        const avatar = document.createElement('div');
+        avatar.className = 'message-avatar';
+        avatar.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                <path d="M2 17l10 5 10-5"/>
+                <path d="M2 12l10 5 10-5"/>
+            </svg>
+        `;
+
+        const content = document.createElement('div');
+        content.className = 'message-content';
+
+        const card = document.createElement('div');
+        card.className = 'resources-card';
+        card.innerHTML = `<p><strong>Further Research</strong> — Here are some resources that may help:</p>`;
+
+        const list = document.createElement('ul');
+        list.className = 'resources-list';
+        for (const r of resources) {
+            const item = document.createElement('li');
+            item.innerHTML = `<a href="${r.url}" target="_blank" rel="noopener noreferrer">${r.name}</a> — ${r.desc}`;
+            list.appendChild(item);
+        }
+        card.appendChild(list);
+        content.appendChild(card);
+
+        messageDiv.appendChild(avatar);
+        messageDiv.appendChild(content);
+
+        messageDiv.style.opacity = '0';
+        messageDiv.style.transform = 'translateY(10px)';
+        messageDiv.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        this.messagesArea.appendChild(messageDiv);
+
+        setTimeout(() => {
+            messageDiv.style.opacity = '1';
+            messageDiv.style.transform = 'translateY(0)';
+            this.scrollToBottom();
+        }, 400);
     }
 
     scrollToBottom() {
