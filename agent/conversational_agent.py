@@ -339,7 +339,7 @@ class ConversationalAgent:
 
     async def _execute_multi_sector_recommendations(self, goal: str) -> str:
         """Fetch stock recommendations from multiple sectors and combine results."""
-        sectors = ["technology", "healthcare", "financials", "energy", "consumer-discretionary"]
+        sectors = ["technology", "healthcare", "financial-services", "energy", "consumer-discretionary"]
         all_stocks = []
         
         for sector in sectors:
