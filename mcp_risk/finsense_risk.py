@@ -50,6 +50,7 @@ def get_sector_ticker(sector: str) -> str:
         "real-estate": "XLRE",
         "utilities": "XLU",
         "communications": "XLC",
+        "communication-services": "XLC",
         "consumer-staples": "XLP"
     }
     return sector_map.get(sector.lower(), "SPY")
