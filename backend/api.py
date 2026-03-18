@@ -367,11 +367,7 @@ async def get_llm_response(
             preferences["sectors"] = parsed["sectors"]
         if parsed.get("risk_tolerance"):
             preferences["risk_tolerance"] = parsed["risk_tolerance"]
-            print(f"[DEBUG] Set risk_tolerance to: {preferences['risk_tolerance']}")
-        
-        # DEBUG: Log current preferences state
-        print(f"[DEBUG] After parsing - preferences: goals={preferences.get('goals')}, sectors={preferences.get('sectors')}, risk={preferences.get('risk_tolerance')}")
-        
+
         # Build natural acknowledgment message
         understood_parts = []
         if preferences.get("goals"):
@@ -411,8 +407,6 @@ async def get_llm_response(
             suggested = suggest_sectors_from_goals(preferences["goals"])
             sectors_q = format_sectors_question(preferences["goals"], suggested)
             message = f"Great! I can see you're interested in {acknowledged}.\n\n{sectors_q}" if acknowledged else sectors_q
-            print(f"[DEBUG] Returning sectors question. Message length: {len(message)}")
-            print(f"[DEBUG] Message preview: {message[:200]}...")
             return {
                 "bot_message": message,
                 "state": "collecting_sectors",
@@ -420,7 +414,7 @@ async def get_llm_response(
             }
         elif not preferences.get("risk_tolerance"):
             risk_q = format_risk_question()
-            message = f"Great! I can see you're interested in {acknowledged}.\n\n{risk_q}" if acknowledged else risk_q
+            message = f"Great! I can see you're interested in {acknowledged}.\n\n{risk_q}" if acknowledged else risk_q  # noqa
             return {
                 "bot_message": message,
                 "state": "collecting_risk",
@@ -530,14 +524,10 @@ async def get_llm_response(
     
     # Collecting sectors
     elif state == "collecting_sectors":
-        # DEBUG: Log what we're starting with
-        print(f"[DEBUG] collecting_sectors - Starting preferences: goals={preferences.get('goals')}, sectors={preferences.get('sectors')}, risk={preferences.get('risk_tolerance')}")
-        
         # First, try to parse the full input to see if they provided risk too
         parsed = parse_initial_query(user_input)
         if parsed.get("risk_tolerance") and not preferences.get("risk_tolerance"):
             preferences["risk_tolerance"] = parsed["risk_tolerance"]
-            print(f"[DEBUG] Updated risk_tolerance from parsed: {preferences['risk_tolerance']}")
         
         suggested_sectors = session.get("data", {}).get("suggested_sectors", [])
         user_input_lower = user_input.strip().lower()
@@ -579,7 +569,6 @@ async def get_llm_response(
                 if additional_sectors:
                     combined.extend(additional_sectors)
                 preferences["sectors"] = combined
-                print(f"[DEBUG] Combined suggested ({suggested_sectors}) + additional ({additional_sectors}) = {combined}")
             elif additional_sectors:
                 # No suggested sectors available, just use additional
                 preferences["sectors"] = additional_sectors
@@ -631,9 +620,7 @@ async def get_llm_response(
         
         # Determine what to ask next
         risk_value = preferences.get("risk_tolerance")
-        print(f"[DEBUG] Before final check - risk_tolerance value: '{risk_value}', type: {type(risk_value)}, bool: {bool(risk_value)}")
-        print(f"[DEBUG] Full preferences dict: {preferences}")
-        
+
         # Create acknowledgment for sectors
         if preferences.get("sectors"):
             sector_list = ', '.join(preferences["sectors"])
@@ -642,14 +629,12 @@ async def get_llm_response(
             acknowledgment = ""
         
         if not risk_value or risk_value not in ["low", "medium", "high"]:
-            print("[DEBUG] Risk tolerance is missing or invalid, asking for it")
             return {
                 "bot_message": acknowledgment + format_risk_question(),
                 "state": "collecting_risk",
                 "data": {}
             }
         else:
-            print(f"[DEBUG] Risk tolerance exists: {risk_value}, going to confirmation")
             return {
                 "bot_message": format_confirmation(
                     preferences, session.get("analysis_mode", "full_research")
@@ -1083,10 +1068,6 @@ async def chat(request: ChatMessage, user: Dict[str, Any] = Depends(get_current_
     # Process message based on state
     response_data = await get_llm_response(request.message, "", session, session_id)
     
-    # DEBUG: Log the response before returning
-    print(f"[DEBUG ENDPOINT] Response data: state={response_data.get('state')}, bot_message length={len(response_data.get('bot_message', ''))}")
-    print(f"[DEBUG ENDPOINT] bot_message preview: {response_data.get('bot_message', '')[:200]}")
-    
     # Update session state
     session["state"] = response_data["state"]
     if "data" in response_data and response_data["data"]:
@@ -1128,23 +1109,16 @@ async def research(request: ResearchRequest, user: Dict[str, Any] = Depends(get_
     session["state"] = "researching"
     
     try:
-        # Initialize coordinator
-        coordinator = FinsenseCoordinator()
-        await coordinator.initialize()
-        
-        # Run research
-        research_data = await coordinator.conduct_research(
+        # Run research using the shared coordinator (already initialized at startup)
+        research_data = await _shared_coordinator.conduct_research(
             sectors=preferences["sectors"],
             risk_tolerance=preferences["risk_tolerance"],
             investment_goals=preferences.get("goals", [])
         )
-        
+
         # Store results
         session["research_data"] = research_data
         session["state"] = "complete"
-        
-        # Cleanup
-        await coordinator.cleanup()
         
         # Format results as HTML
         if analysis_mode == "stock_picks":
