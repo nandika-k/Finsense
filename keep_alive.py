@@ -1,5 +1,5 @@
 """
-Keep-alive script to ping Render deployment every 14 minutes.
+Keep-alive script to ping HuggingFace Spaces deployment every 14 minutes.
 Prevents the free tier from spinning down due to inactivity.
 """
 
@@ -8,8 +8,9 @@ import requests
 from datetime import datetime
 import os
 
-# Your Render deployment URL
-RENDER_URL = os.getenv("RENDER_URL", "https://finsense-ktp7.onrender.com")
+# Your HuggingFace Space URL — format: https://{username}-{space-name}.hf.space
+# Can also set BACKEND_URL env var to override
+RENDER_URL = os.getenv("BACKEND_URL", "https://YOUR_HF_USERNAME-YOUR_SPACE_NAME.hf.space")
 PING_INTERVAL = 14 * 60  # 14 minutes in seconds
 
 def ping_server():

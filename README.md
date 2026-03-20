@@ -1,4 +1,14 @@
-﻿# Finsense
+﻿---
+title: Finsense
+emoji: 📈
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
+# Finsense
 A personalized financial research assistant.
 
 Finsense helps users make sense of market uncertainty by combining live market data, news events, and risk analysis. Instead of giving investment advice, it highlights what areas of the market are worth researching based on current conditions and a user’s preferences.
