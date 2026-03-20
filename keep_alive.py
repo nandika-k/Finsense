@@ -10,7 +10,7 @@ import os
 
 # Your HuggingFace Space URL — format: https://{username}-{space-name}.hf.space
 # Can also set BACKEND_URL env var to override
-RENDER_URL = os.getenv("BACKEND_URL", "https://YOUR_HF_USERNAME-YOUR_SPACE_NAME.hf.space")
+RENDER_URL = os.getenv("BACKEND_URL", "https://nandika-k-finsense.hf.space")
 PING_INTERVAL = 14 * 60  # 14 minutes in seconds
 
 def ping_server():

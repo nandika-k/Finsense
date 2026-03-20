@@ -1,11 +1,9 @@
 // Chatbot UI Script with FastAPI Backend Integration
 
 // Use local backend for development, deployed backend for production
-// TODO: Replace YOUR_HF_USERNAME and YOUR_SPACE_NAME with your actual HF Space details
-// Format: https://{username}-{space-name}.hf.space
 const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
     ? 'http://localhost:8000'
-    : 'https://YOUR_HF_USERNAME-YOUR_SPACE_NAME.hf.space';
+    : 'https://nandika-k-finsense.hf.space';
 
 class ChatbotUI {
     constructor() {
