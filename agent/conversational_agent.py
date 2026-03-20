@@ -144,8 +144,13 @@ class ConversationalAgent:
         ):
             return "Got it. " + self._format_preferences_view(current_preferences)
 
-        # Fast-path: If user explicitly asks for stocks, skip to stock recommendations immediately
-        if re.search(r"\bstock\b|\bstocks\b", raw_query) and intent != IntentType.STOCK_RECOMMENDATIONS:
+        # Fast-path: If user explicitly asks for stocks (not asking about a specific stock's details),
+        # skip to stock recommendations immediately.
+        if re.search(r"\bstock\b|\bstocks\b", raw_query) and intent not in {
+            IntentType.STOCK_RECOMMENDATIONS,
+            IntentType.STOCK_DETAILS,
+            IntentType.GENERAL_INFO,
+        }:
             stock_classification = IntentClassification(
                 intent_type=IntentType.STOCK_RECOMMENDATIONS,
                 confidence=classification.confidence,
@@ -449,12 +454,15 @@ class ConversationalAgent:
             current_price = price.get("price", details.get("price", "N/A"))
             perf_1m = details.get("performance_1m", "N/A")
             vol = details.get("volatility", "N/A")
-            
-            lines = [f"**📈 {ticker}** - {name}", ""]
+
+            header = f"**📈 {ticker}**" + (f" — {name}" if name else "")
+            lines = [header, ""]
             lines.append(f"- **Price:** ${current_price}")
             lines.append(f"- **1M Performance:** {perf_1m}")
             lines.append(f"- **Volatility:** {vol}")
-            
+            if ticker != "N/A":
+                lines.append(f"- **More info:** [Yahoo Finance](https://finance.yahoo.com/quote/{ticker})")
+
             return "\n".join(lines)
 
         if intent == IntentType.COMPARE:

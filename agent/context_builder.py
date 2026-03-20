@@ -222,11 +222,6 @@ class ContextBuilder:
 
         if repeated:
             response = f"As mentioned earlier, {response[0].lower() + response[1:] if len(response) > 1 else response}"
-        elif references:
-            response = (
-                "Based on your earlier question, this builds on the previous context.\n"
-                + response
-            )
 
         # Only apply LLM polish for simple responses without structured data
         # Skip for responses with URLs, stock data, or formatted sections to preserve accuracy
